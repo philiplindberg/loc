@@ -138,8 +138,8 @@ Classification needs one pass over the file's bytes tracking three states: insid
 | Rust | `.rs` | `//` | `/* */` | **yes** | `"…"` **multi**, escapes; `r#*"…"#*` multi, no escapes; `'…'` char with lookahead | `#dea584` |
 | Zig | `.zig` | `//` | none | — | `"…"` single, escapes; `'…'` char; `\\` line strings | `#ec915c` |
 | Python | `.py` `.pyi` | `#` | none | — | `"…"` `'…'` single, escapes; `"""…"""` `'''…'''` multi, escapes; prefixes | `#3572a5` |
-| JSON | `.json` `.jsonc` | `//` | `/* */` | no | `"…"` single, escapes | `#cbcb41` |
-| Markdown | `.md` `.markdown` | none | none | — | none | `#519aba` |
+| JSON | `.json` `.jsonc` | `//` | `/* */` | no | `"…"` single, escapes | `#292929` |
+| Markdown | `.md` `.markdown` | none | none | — | none | `#083fa1` |
 | C | `.c` `.h` | `//` | `/* */` | no | `"…"` single, escapes; `'…'` char | `#555555` |
 | C++ | `.cpp` `.cc` `.cxx` `.hpp` `.hh` `.hxx` | `//` | `/* */` | no | identical to C | `#f34b7d` |
 | Rip | `.rip` | `#` | `### ###`, at line start only | no | `"…"` single, escapes, `#{}` `${}` interpolation; `'…'` single, escapes; `"""…"""` multi, escapes, `#{}` `${}` interpolation; `'''…'''` multi, escapes; heregex `///…///` multi, escapes, `#{}` interpolation; regex `/…/` | `#ab2317` |
@@ -166,7 +166,7 @@ Classification needs one pass over the file's bytes tracking three states: insid
 | XML | `.xml` `.xsd` `.xsl` `.xslt` | none | `<!-- -->` | no | none | `#0060ac` |
 | PHP | `.php` `.phtml` | none | `<!-- -->` | no | identical to HTML, plus `<?php`/`<?=` … `?>` regions with the code rules under Scanner | `#4f5d95` |
 
-Colors are GitHub linguist's, except JSON and Markdown, whose linguist colors are unreadable on a dark background and take Seti's, and Rip, which linguist does not list.
+Colors are GitHub linguist's, except Rip, which linguist does not list.
 
 `///` and `//!` begin with `//` and are comments. A `#!` shebang line is a comment where `#` opens a comment (Python, Rip, CoffeeScript, Ruby, Shell, YAML, TOML), and code in TypeScript and JavaScript, where it does not; there is no special case. A kind marked multi in the table may span lines; the others end at the newline. Doc comments and docstrings get no special treatment.
 

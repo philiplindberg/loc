@@ -234,7 +234,7 @@ fn markup(name: &'static str, extensions: &'static [&'static str], color: [u8; 3
     }
 }
 
-// Colors are GitHub linguist's, except JSON and Markdown, whose linguist colors are unreadable on a dark background and take Seti's, and Rip, which linguist does not list.
+// Colors are GitHub linguist's, except Rip, which linguist does not list.
 pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
     prepare(vec![
         js_family(
@@ -305,13 +305,13 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
             block_open: b"/*",
             block_close: b"*/",
             strings: vec![DQ],
-            color: [0xcb, 0xcb, 0x41],
+            color: [0x29, 0x29, 0x29],
             ..NONE
         },
         Lang {
             name: "Markdown",
             extensions: &[".md", ".markdown"],
-            color: [0x51, 0x9a, 0xba],
+            color: [0x08, 0x3f, 0xa1],
             ..NONE
         },
         c_family("C", &[".c", ".h"], [0x55, 0x55, 0x55]),
