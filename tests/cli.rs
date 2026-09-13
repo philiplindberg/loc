@@ -340,6 +340,11 @@ fn languages_lists_the_table() {
         "no trailing spaces"
     );
     assert!(!text.contains("PHP code"));
+    let readme_block = format!("## Languages\n\n```\n{text}```\n");
+    assert!(
+        readme.contains(&readme_block),
+        "README.md's Languages section is not the output of loc --languages"
+    );
 }
 
 #[test]
