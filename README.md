@@ -19,6 +19,7 @@ Counts lines of code per language across a directory tree. Honors `.gitignore`, 
 | Less | `.less` |
 | Markdown | `.md` `.markdown` |
 | Objective-C | `.m` `.mm` |
+| PHP | `.php` `.phtml`, `#!` `php` |
 | Python | `.py` `.pyi`, `#!` `python` `python2` `python3` |
 | Rip | `.rip` |
 | Ruby | `.rb` `.rake` `.gemspec`, `Gemfile`, `Rakefile`, `#!` `ruby` |

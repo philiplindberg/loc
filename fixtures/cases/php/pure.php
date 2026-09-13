@@ -1,0 +1,3 @@
+<?PHP
+namespace X;
+// c

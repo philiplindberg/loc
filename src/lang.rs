@@ -113,12 +113,28 @@ pub enum Heredoc {
     None,
     Shell, // optional -, then spaces, then a word that may be quoted or start with \
     Ruby,  // optional - or ~, then a word that may be quoted, with no space anywhere
+    Php, // a third <, spaces, then a word that may be quoted; the terminator may be indented and followed by ; or ,
 }
 
-// An embedded language: the body of <tag …> up to </tag> is scanned as lang.
-pub struct Region {
-    pub tag: &'static [u8],
-    pub lang: &'static str,
+// An embedded language: the body between the delimiters is scanned as lang.
+pub enum Region {
+    Tag {
+        name: &'static [u8], // <name …> opens after its >, </name> closes
+        lang: &'static str,
+    },
+    Between {
+        open: &'static [u8], // compared without regard to ASCII case
+        close: &'static [u8],
+        lang: &'static str,
+    },
+}
+
+impl Region {
+    pub fn lang(&self) -> &'static str {
+        match self {
+            Region::Tag { lang, .. } | Region::Between { lang, .. } => lang,
+        }
+    }
 }
 
 // A language as the scanner sees it. Empty slices, None, and false mean the syntax is absent.
@@ -127,8 +143,9 @@ pub struct Lang {
     pub extensions: &'static [&'static str], // lower-case, dot included
     pub names: &'static [&'static str],      // whole file names recognized without an extension
     pub shebangs: &'static [&'static str], // interpreters whose #! line recognizes an extensionless file
-    pub line: &'static [u8],               // line-comment opener
-    pub block_open: &'static [u8],         // block-comment opener; empty when the language has none
+    pub line: &'static [&'static [u8]], // line-comment openers; none shares a prefix with another
+    pub hash_attribute: bool,           // `#[` begins an attribute, not a comment (PHP)
+    pub block_open: &'static [u8],      // block-comment opener; empty when the language has none
     pub block_close: &'static [u8],
     pub nests: bool, // block comments nest (Rust); false ends one at the first closer (Go)
     pub block_at_line_start: bool, // a block comment opens only as the first non-whitespace bytes of a line (Rip)
@@ -149,7 +166,8 @@ const NONE: Lang = Lang {
     extensions: &[],
     names: &[],
     shebangs: &[],
-    line: b"",
+    line: &[],
+    hash_attribute: false,
     block_open: b"",
     block_close: b"",
     nests: false,
@@ -170,7 +188,7 @@ fn c_family(name: &'static str, extensions: &'static [&'static str], color: [u8;
     Lang {
         name,
         extensions,
-        line: b"//",
+        line: &[b"//"],
         block_open: b"/*",
         block_close: b"*/",
         strings: vec![DQ],
@@ -184,7 +202,7 @@ fn js_family(name: &'static str, extensions: &'static [&'static str], color: [u8
     Lang {
         name,
         extensions,
-        line: b"//",
+        line: &[b"//"],
         block_open: b"/*",
         block_close: b"*/",
         strings: vec![TICK, DQ, SQ],
@@ -202,12 +220,12 @@ fn markup(name: &'static str, extensions: &'static [&'static str], color: [u8; 3
         block_open: b"<!--",
         block_close: b"-->",
         regions: &[
-            Region {
-                tag: b"script",
+            Region::Tag {
+                name: b"script",
                 lang: "JavaScript",
             },
-            Region {
-                tag: b"style",
+            Region::Tag {
+                name: b"style",
                 lang: "CSS",
             },
         ],
@@ -235,7 +253,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Go",
             extensions: &[".go"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             strings: vec![kind(b"`", b"`", false, true), DQ],
@@ -246,7 +264,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Rust",
             extensions: &[".rs"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             nests: true,
@@ -259,7 +277,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Zig",
             extensions: &[".zig"],
-            line: b"//",
+            line: &[b"//"],
             strings: vec![DQ],
             chars: Chars::Always,
             zig_line_string: true,
@@ -270,7 +288,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
             name: "Python",
             extensions: &[".py", ".pyi"],
             shebangs: &["python", "python2", "python3"],
-            line: b"#",
+            line: &[b"#"],
             strings: vec![
                 kind(b"\"\"\"", b"\"\"\"", true, true),
                 kind(b"'''", b"'''", true, true),
@@ -283,7 +301,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "JSON",
             extensions: &[".json", ".jsonc"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             strings: vec![DQ],
@@ -305,7 +323,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Rip",
             extensions: &[".rip"],
-            line: b"#",
+            line: &[b"#"],
             block_open: b"###",
             block_close: b"###",
             block_at_line_start: true,
@@ -332,7 +350,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "YAML",
             extensions: &[".yml", ".yaml"],
-            line: b"#",
+            line: &[b"#"],
             strings: vec![DQ, kind(b"'", b"'", false, false)],
             color: [0xcb, 0x17, 0x1e],
             ..NONE
@@ -340,7 +358,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "TOML",
             extensions: &[".toml"],
-            line: b"#",
+            line: &[b"#"],
             strings: vec![
                 kind(b"\"\"\"", b"\"\"\"", true, true),
                 kind(b"'''", b"'''", false, true),
@@ -353,7 +371,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "SQL",
             extensions: &[".sql"],
-            line: b"--",
+            line: &[b"--"],
             block_open: b"/*",
             block_close: b"*/",
             strings: vec![
@@ -366,7 +384,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Dart",
             extensions: &[".dart"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             nests: true,
@@ -383,7 +401,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
             name: "CoffeeScript",
             extensions: &[".coffee"],
             shebangs: &["coffee"],
-            line: b"#",
+            line: &[b"#"],
             block_open: b"###",
             block_close: b"###",
             block_at_line_start: true,
@@ -405,7 +423,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
             extensions: &[".rb", ".rake", ".gemspec"],
             names: &["Gemfile", "Rakefile"],
             shebangs: &["ruby"],
-            line: b"#",
+            line: &[b"#"],
             block_open: b"=begin",
             block_close: b"=end",
             block_at_line_start: true,
@@ -435,7 +453,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
                 ".zlogout",
             ],
             shebangs: &["sh", "bash", "zsh", "ksh", "dash"],
-            line: b"#",
+            line: &[b"#"],
             strings: vec![
                 kind(b"\"", b"\"", true, true),
                 kind(b"'", b"'", false, true),
@@ -450,7 +468,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Java",
             extensions: &[".java"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             strings: vec![kind(b"\"\"\"", b"\"\"\"", true, true), DQ],
@@ -461,7 +479,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Kotlin",
             extensions: &[".kt", ".kts"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             nests: true,
@@ -476,7 +494,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Scala",
             extensions: &[".scala", ".sc", ".sbt"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             nests: true,
@@ -491,7 +509,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Groovy",
             extensions: &[".groovy", ".gvy", ".gradle"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             strings: vec![
@@ -506,7 +524,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Swift",
             extensions: &[".swift"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             nests: true,
@@ -518,7 +536,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "SCSS",
             extensions: &[".scss"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             strings: vec![DQ, SQ],
@@ -528,7 +546,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Sass",
             extensions: &[".sass"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             strings: vec![DQ, SQ],
@@ -538,11 +556,52 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Less",
             extensions: &[".less"],
-            line: b"//",
+            line: &[b"//"],
             block_open: b"/*",
             block_close: b"*/",
             strings: vec![DQ, SQ],
             color: [0x1d, 0x36, 0x5d],
+            ..NONE
+        },
+        Lang {
+            name: "PHP",
+            extensions: &[".php", ".phtml"],
+            shebangs: &["php"],
+            regions: &[
+                Region::Tag {
+                    name: b"script",
+                    lang: "JavaScript",
+                },
+                Region::Tag {
+                    name: b"style",
+                    lang: "CSS",
+                },
+                Region::Between {
+                    open: b"<?php",
+                    close: b"?>",
+                    lang: "PHP code",
+                },
+                Region::Between {
+                    open: b"<?=",
+                    close: b"?>",
+                    lang: "PHP code",
+                },
+            ],
+            ..markup("PHP", &[], [0x4f, 0x5d, 0x95])
+        },
+        // The rules inside PHP's <?php … ?> regions; never recognized by extension, so never a row of its own.
+        Lang {
+            name: "PHP code",
+            line: &[b"//", b"#"],
+            hash_attribute: true,
+            block_open: b"/*",
+            block_close: b"*/",
+            strings: vec![
+                interpolating(b"\"", b"\"", true, true, &[b"{$"]),
+                kind(b"'", b"'", true, true),
+                kind(b"`", b"`", true, false),
+            ],
+            heredoc: Heredoc::Php,
             ..NONE
         },
         Lang {
@@ -622,15 +681,15 @@ fn prepare(mut langs: Vec<Lang>) -> Vec<Lang> {
             .map(|region| {
                 names
                     .iter()
-                    .position(|&name| name == region.lang)
+                    .position(|&name| name == region.lang())
                     .expect("a region names a language in the table")
             })
             .collect();
         for &b in b" \t\r\x0c\x0b\\" {
             lang.starts[b as usize] = true;
         }
-        if let Some(&b) = lang.line.first() {
-            lang.starts[b as usize] = true;
+        for opener in lang.line {
+            lang.starts[opener[0] as usize] = true;
         }
         if let Some(&b) = lang.block_open.first() {
             lang.starts[b as usize] = true;
