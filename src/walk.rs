@@ -10,7 +10,7 @@ use std::sync::{Condvar, Mutex};
 use std::thread;
 
 use crate::ignore::{IgnoreFile, ancestors, ignored, offset_below, read_ignore};
-use crate::lang::{LANGS, by_ext};
+use crate::lang::{LANGS, by_ext, by_name, by_shebang};
 use crate::scan::{Counts, scan};
 
 // Sums kept by one worker: per-language totals by language index, and skipped files by label, text and binary apart.
@@ -60,20 +60,30 @@ impl Sums {
 
     fn count(&mut self, path: &Path, reader: &mut Reader) {
         let name = path.file_name().map_or(&b""[..], |n| n.as_bytes());
-        let Some(li) = extension(name).and_then(by_ext) else {
+        let ext = extension(name);
+        let mut li = ext.and_then(by_ext).or_else(|| by_name(name));
+        if li.is_none() {
+            // Unrecognized so far: the head decides between binary, a shebang naming a language (extensionless files only), and skipped text.
             match reader.head(path) {
                 Ok((head, size)) => {
-                    let group = if head.contains(&0) {
-                        &mut self.binary
+                    if head.contains(&0) {
+                        add(&mut self.binary, label(name), 1, size);
+                        return;
+                    }
+                    li = if ext.is_none() {
+                        shebang(head).and_then(by_shebang)
                     } else {
-                        &mut self.text
+                        None
                     };
-                    add(group, label(name), 1, size);
+                    if li.is_none() {
+                        add(&mut self.text, label(name), 1, size);
+                        return;
+                    }
                 }
-                Err(err) => self.unreadable(path, &err),
+                Err(err) => return self.unreadable(path, &err),
             }
-            return;
-        };
+        }
+        let li = li.expect("recognized above");
         let buf = match reader.read(path) {
             Ok(buf) => buf,
             Err(err) => return self.unreadable(path, &err),
@@ -218,6 +228,25 @@ impl Reader<'_> {
         self.buf.clear();
         f.take(NUL_WINDOW as u64).read_to_end(&mut self.buf)?;
         Ok((&self.buf, size))
+    }
+}
+
+// The interpreter named by a #! first line: the last component of the first word, or the first word after env that is not an option.
+fn shebang(head: &[u8]) -> Option<&[u8]> {
+    let line = head.strip_prefix(b"#!")?;
+    let line = &line[..line
+        .iter()
+        .position(|&b| b == b'\n' || b == b'\r')
+        .unwrap_or(line.len())];
+    let mut words = line
+        .split(|&b| b == b' ' || b == b'\t')
+        .filter(|w| !w.is_empty());
+    let first = words.next()?;
+    let base = &first[first.iter().rposition(|&b| b == b'/').map_or(0, |k| k + 1)..];
+    if base == b"env" {
+        words.find(|w| w[0] != b'-')
+    } else {
+        Some(base)
     }
 }
 

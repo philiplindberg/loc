@@ -1,0 +1,9 @@
+# comment
+[table]
+s = """
+# inside
+"""
+lit = '''
+# inside
+'''
+raw = 'C:\path' # trailing

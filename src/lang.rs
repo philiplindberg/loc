@@ -42,13 +42,13 @@ const fn interpolating(
     }
 }
 
-const JS_INTERP: &[&[u8]] = &[b"${"];
+const DOLLAR_INTERP: &[&[u8]] = &[b"${"];
+const HASH_INTERP: &[&[u8]] = &[b"#{"];
 const RIP_INTERP: &[&[u8]] = &[b"#{", b"${"];
-const RIP_HEREGEX_INTERP: &[&[u8]] = &[b"#{"];
 
 const DQ: StrKind = kind(b"\"", b"\"", true, false);
 const SQ: StrKind = kind(b"'", b"'", true, false);
-const TICK: StrKind = interpolating(b"`", b"`", true, true, JS_INTERP);
+const TICK: StrKind = interpolating(b"`", b"`", true, true, DOLLAR_INTERP);
 pub static CHAR: StrKind = kind(b"'", b"'", true, false);
 
 // Words after which a / opens a regex literal.
@@ -95,6 +95,10 @@ const RIP_REGEX_WORDS: &[&[u8]] = &[
     b"isnt",
     b"then",
 ];
+const RUBY_REGEX_WORDS: &[&[u8]] = &[
+    b"if", b"unless", b"while", b"until", b"and", b"or", b"not", b"then", b"else", b"elsif",
+    b"when", b"case", b"return", b"yield", b"raise",
+];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Chars {
@@ -103,12 +107,28 @@ pub enum Chars {
     Rust,   // ' opens one only before \ or when the byte after next is ': lifetimes have no closer
 }
 
+// How a language spells a heredoc opener after <<.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Heredoc {
+    None,
+    Shell, // optional -, then spaces, then a word that may be quoted or start with \
+    Ruby,  // optional - or ~, then a word that may be quoted, with no space anywhere
+}
+
+// An embedded language: the body of <tag …> up to </tag> is scanned as lang.
+pub struct Region {
+    pub tag: &'static [u8],
+    pub lang: &'static str,
+}
+
 // A language as the scanner sees it. Empty slices, None, and false mean the syntax is absent.
 pub struct Lang {
     pub name: &'static str,
     pub extensions: &'static [&'static str], // lower-case, dot included
-    pub line: &'static [u8],                 // line-comment opener
-    pub block_open: &'static [u8], // block-comment opener; empty when the language has none
+    pub names: &'static [&'static str],      // whole file names recognized without an extension
+    pub shebangs: &'static [&'static str], // interpreters whose #! line recognizes an extensionless file
+    pub line: &'static [u8],               // line-comment opener
+    pub block_open: &'static [u8],         // block-comment opener; empty when the language has none
     pub block_close: &'static [u8],
     pub nests: bool, // block comments nest (Rust); false ends one at the first closer (Go)
     pub block_at_line_start: bool, // a block comment opens only as the first non-whitespace bytes of a line (Rip)
@@ -117,6 +137,9 @@ pub struct Lang {
     pub regex: Option<&'static [&'static [u8]]>, // /…/ literals by the previous-byte-or-word rule, with the words
     pub zig_line_string: bool,                   // \\ to end of line
     pub rust_raw: bool,                          // r#*"…"#*, optional b prefix
+    pub heredoc: Heredoc,
+    pub regions: &'static [Region],
+    pub region_langs: Vec<usize>, // the language index of each region, from prepare
     pub color: [u8; 3],
     pub starts: [bool; 256], // bytes that can begin a token in normal state; any other byte is plain code
 }
@@ -124,6 +147,8 @@ pub struct Lang {
 const NONE: Lang = Lang {
     name: "",
     extensions: &[],
+    names: &[],
+    shebangs: &[],
     line: b"",
     block_open: b"",
     block_close: b"",
@@ -134,6 +159,9 @@ const NONE: Lang = Lang {
     regex: None,
     zig_line_string: false,
     rust_raw: false,
+    heredoc: Heredoc::None,
+    regions: &[],
+    region_langs: Vec::new(),
     color: [0; 3],
     starts: [false; 256],
 };
@@ -166,6 +194,28 @@ fn js_family(name: &'static str, extensions: &'static [&'static str], color: [u8
     }
 }
 
+// Markup with <!-- --> comments, JavaScript inside <script> and CSS inside <style>, and no string syntax of its own.
+fn markup(name: &'static str, extensions: &'static [&'static str], color: [u8; 3]) -> Lang {
+    Lang {
+        name,
+        extensions,
+        block_open: b"<!--",
+        block_close: b"-->",
+        regions: &[
+            Region {
+                tag: b"script",
+                lang: "JavaScript",
+            },
+            Region {
+                tag: b"style",
+                lang: "CSS",
+            },
+        ],
+        color,
+        ..NONE
+    }
+}
+
 // Colors are GitHub linguist's, except JSON and Markdown, whose linguist colors are unreadable on a dark background and take Seti's, and Rip, which linguist does not list.
 pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
     prepare(vec![
@@ -174,11 +224,14 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
             &[".ts", ".tsx", ".mts", ".cts"],
             [0x31, 0x78, 0xc6],
         ),
-        js_family(
-            "JavaScript",
-            &[".js", ".mjs", ".cjs", ".jsx"],
-            [0xf1, 0xe0, 0x5a],
-        ),
+        Lang {
+            shebangs: &["node", "nodejs"],
+            ..js_family(
+                "JavaScript",
+                &[".js", ".mjs", ".cjs", ".jsx"],
+                [0xf1, 0xe0, 0x5a],
+            )
+        },
         Lang {
             name: "Go",
             extensions: &[".go"],
@@ -216,6 +269,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Python",
             extensions: &[".py", ".pyi"],
+            shebangs: &["python", "python2", "python3"],
             line: b"#",
             strings: vec![
                 kind(b"\"\"\"", b"\"\"\"", true, true),
@@ -258,7 +312,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
             strings: vec![
                 interpolating(b"\"\"\"", b"\"\"\"", true, true, RIP_INTERP),
                 kind(b"'''", b"'''", true, true),
-                interpolating(b"///", b"///", true, true, RIP_HEREGEX_INTERP),
+                interpolating(b"///", b"///", true, true, HASH_INTERP),
                 interpolating(b"\"", b"\"", true, false, RIP_INTERP),
                 SQ,
             ],
@@ -266,6 +320,133 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
             color: [0xab, 0x23, 0x17],
             ..NONE
         },
+        Lang {
+            name: "CSS",
+            extensions: &[".css"],
+            block_open: b"/*",
+            block_close: b"*/",
+            strings: vec![DQ, SQ],
+            color: [0x66, 0x33, 0x99],
+            ..NONE
+        },
+        Lang {
+            name: "YAML",
+            extensions: &[".yml", ".yaml"],
+            line: b"#",
+            strings: vec![DQ, kind(b"'", b"'", false, false)],
+            color: [0xcb, 0x17, 0x1e],
+            ..NONE
+        },
+        Lang {
+            name: "TOML",
+            extensions: &[".toml"],
+            line: b"#",
+            strings: vec![
+                kind(b"\"\"\"", b"\"\"\"", true, true),
+                kind(b"'''", b"'''", false, true),
+                DQ,
+                kind(b"'", b"'", false, false),
+            ],
+            color: [0x9c, 0x42, 0x21],
+            ..NONE
+        },
+        Lang {
+            name: "SQL",
+            extensions: &[".sql"],
+            line: b"--",
+            block_open: b"/*",
+            block_close: b"*/",
+            strings: vec![
+                kind(b"'", b"'", false, true),
+                kind(b"\"", b"\"", false, false),
+            ],
+            color: [0xe3, 0x8c, 0x00],
+            ..NONE
+        },
+        Lang {
+            name: "Dart",
+            extensions: &[".dart"],
+            line: b"//",
+            block_open: b"/*",
+            block_close: b"*/",
+            nests: true,
+            strings: vec![
+                interpolating(b"\"\"\"", b"\"\"\"", true, true, DOLLAR_INTERP),
+                interpolating(b"'''", b"'''", true, true, DOLLAR_INTERP),
+                interpolating(b"\"", b"\"", true, false, DOLLAR_INTERP),
+                interpolating(b"'", b"'", true, false, DOLLAR_INTERP),
+            ],
+            color: [0x00, 0xb4, 0xab],
+            ..NONE
+        },
+        Lang {
+            name: "CoffeeScript",
+            extensions: &[".coffee"],
+            shebangs: &["coffee"],
+            line: b"#",
+            block_open: b"###",
+            block_close: b"###",
+            block_at_line_start: true,
+            strings: vec![
+                interpolating(b"\"\"\"", b"\"\"\"", true, true, HASH_INTERP),
+                kind(b"'''", b"'''", true, true),
+                interpolating(b"///", b"///", true, true, HASH_INTERP),
+                kind(b"```", b"```", false, true),
+                interpolating(b"\"", b"\"", true, false, HASH_INTERP),
+                SQ,
+                kind(b"`", b"`", false, false),
+            ],
+            regex: Some(RIP_REGEX_WORDS),
+            color: [0x24, 0x47, 0x76],
+            ..NONE
+        },
+        Lang {
+            name: "Ruby",
+            extensions: &[".rb", ".rake", ".gemspec"],
+            names: &["Gemfile", "Rakefile"],
+            shebangs: &["ruby"],
+            line: b"#",
+            block_open: b"=begin",
+            block_close: b"=end",
+            block_at_line_start: true,
+            strings: vec![
+                interpolating(b"\"", b"\"", true, true, HASH_INTERP),
+                kind(b"'", b"'", true, true),
+                kind(b"`", b"`", true, false),
+            ],
+            regex: Some(RUBY_REGEX_WORDS),
+            heredoc: Heredoc::Ruby,
+            color: [0x70, 0x15, 0x16],
+            ..NONE
+        },
+        Lang {
+            name: "Shell",
+            extensions: &[".sh", ".bash", ".zsh", ".ksh"],
+            names: &[
+                ".bashrc",
+                ".bash_profile",
+                ".bash_aliases",
+                ".bash_logout",
+                ".profile",
+                ".zshrc",
+                ".zshenv",
+                ".zprofile",
+                ".zlogin",
+                ".zlogout",
+            ],
+            shebangs: &["sh", "bash", "zsh", "ksh", "dash"],
+            line: b"#",
+            strings: vec![
+                kind(b"\"", b"\"", true, true),
+                kind(b"'", b"'", false, true),
+            ],
+            heredoc: Heredoc::Shell,
+            color: [0x89, 0xe0, 0x51],
+            ..NONE
+        },
+        markup("HTML", &[".html", ".htm"], [0xe3, 0x4c, 0x26]),
+        markup("Vue", &[".vue"], [0x41, 0xb8, 0x83]),
+        markup("Svelte", &[".svelte"], [0xff, 0x3e, 0x00]),
     ])
 });
 
@@ -287,6 +468,22 @@ static BY_EXT: LazyLock<HashMap<&'static [u8], usize>> = LazyLock::new(|| {
         .collect()
 });
 
+static BY_NAME: LazyLock<HashMap<&'static [u8], usize>> = LazyLock::new(|| {
+    LANGS
+        .iter()
+        .enumerate()
+        .flat_map(|(i, lang)| lang.names.iter().map(move |name| (name.as_bytes(), i)))
+        .collect()
+});
+
+static BY_SHEBANG: LazyLock<HashMap<&'static [u8], usize>> = LazyLock::new(|| {
+    LANGS
+        .iter()
+        .enumerate()
+        .flat_map(|(i, lang)| lang.shebangs.iter().map(move |s| (s.as_bytes(), i)))
+        .collect()
+});
+
 // Language index by extension, dot included, compared without regard to ASCII case.
 pub fn by_ext(ext: &[u8]) -> Option<usize> {
     let mut lower = [0; EXT_MAX];
@@ -296,12 +493,33 @@ pub fn by_ext(ext: &[u8]) -> Option<usize> {
     BY_EXT.get(&*lower).copied()
 }
 
+// Language index by whole file name, compared exactly.
+pub fn by_name(name: &[u8]) -> Option<usize> {
+    BY_NAME.get(name).copied()
+}
+
+// Language index by the interpreter of a #! line, compared exactly.
+pub fn by_shebang(interpreter: &[u8]) -> Option<usize> {
+    BY_SHEBANG.get(interpreter).copied()
+}
+
 // The scanner only ever tests a byte against these derived tables.
 fn prepare(mut langs: Vec<Lang>) -> Vec<Lang> {
+    let names: Vec<&str> = langs.iter().map(|lang| lang.name).collect();
     for lang in &mut langs {
         // Longest opener first, so `"""` is tried before `"`; the sort is stable, so equal lengths keep table order.
         lang.strings
             .sort_by_key(|kind| std::cmp::Reverse(kind.open.len()));
+        lang.region_langs = lang
+            .regions
+            .iter()
+            .map(|region| {
+                names
+                    .iter()
+                    .position(|&name| name == region.lang)
+                    .expect("a region names a language in the table")
+            })
+            .collect();
         for &b in b" \t\r\x0c\x0b\\" {
             lang.starts[b as usize] = true;
         }
@@ -327,6 +545,9 @@ fn prepare(mut langs: Vec<Lang>) -> Vec<Lang> {
         if lang.rust_raw {
             lang.starts[b'r' as usize] = true;
             lang.starts[b'b' as usize] = true;
+        }
+        if lang.heredoc != Heredoc::None || !lang.regions.is_empty() {
+            lang.starts[b'<' as usize] = true;
         }
     }
     langs

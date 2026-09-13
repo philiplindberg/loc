@@ -1,6 +1,6 @@
-// Line classification and the scanner, SPEC.md sections of the same names. One pass over the bytes of a file; the state that survives a line is the open block-comment depth, the open string, and the interpolation stack.
+// Line classification and the scanner, SPEC.md sections of the same names. One pass over the bytes of a file; the state that survives a line is the open block-comment depth, the open string, the interpolation stack, the open heredoc, and the embedded language.
 
-use crate::lang::{CHAR, Chars, Lang, StrKind};
+use crate::lang::{CHAR, Chars, Heredoc, LANGS, Lang, StrKind};
 
 #[derive(Clone, Copy, Default)]
 pub struct Counts {
@@ -41,6 +41,11 @@ fn starts_with(buf: &[u8], i: usize, end: usize, s: &[u8]) -> bool {
     i + s.len() <= end && &buf[i..i + s.len()] == s
 }
 
+// Whether s occurs at buf[i] without crossing end, ignoring ASCII case.
+fn starts_with_ci(buf: &[u8], i: usize, end: usize, s: &[u8]) -> bool {
+    i + s.len() <= end && buf[i..i + s.len()].eq_ignore_ascii_case(s)
+}
+
 // The open string: a kind from the language table, a char literal, or a Rust raw string with its hash count, whose closer is a quote followed by that many #.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Open {
@@ -49,21 +54,35 @@ enum Open {
     Raw(usize),
 }
 
+// A heredoc whose body runs from the line after its opener to a line equal to word; when indented, whitespace may precede the word on that line.
+struct OpenHeredoc {
+    word: Vec<u8>,
+    indented: bool,
+}
+
 struct Scanner<'a> {
+    outer: &'a Lang, // the file's language, kept while an embedded region switches lang
     lang: &'a Lang,
     buf: &'a [u8],
     block_depth: usize,
     open: Option<Open>,
     interp: Vec<(usize, usize)>, // string kind and brace depth of each open interpolation, innermost last
+    heredoc: Option<OpenHeredoc>,
+    region: Option<&'static [u8]>, // tag of the open embedded region; </tag> returns to outer
+    pending_region: Option<usize>, // index in outer.regions of a tag whose > has not been seen yet
 }
 
 pub fn scan(buf: &[u8], lang: &Lang) -> Counts {
     let mut scanner = Scanner {
+        outer: lang,
         lang,
         buf,
         block_depth: 0,
         open: None,
         interp: Vec::new(),
+        heredoc: None,
+        region: None,
+        pending_region: None,
     };
     let mut counts = Counts::default();
     let mut pos = if buf.starts_with(&[0xef, 0xbb, 0xbf]) {
@@ -118,12 +137,29 @@ impl<'a> Scanner<'a> {
 
     // Scans buf[pos..end] and classifies it, leaving the cross-line state for the next line.
     fn line(&mut self, pos: usize, end: usize) -> Class {
-        let (buf, lang) = (self.buf, self.lang);
+        let buf = self.buf;
+        if let Some(heredoc) = &self.heredoc {
+            // the body of a heredoc opened on an earlier line, up to and including its terminator
+            let line = &buf[pos..end];
+            let content = if heredoc.indented {
+                let k = line
+                    .iter()
+                    .position(|&b| !WHITESPACE[b as usize])
+                    .unwrap_or(line.len());
+                &line[k..]
+            } else {
+                line
+            };
+            if content == &heredoc.word[..] {
+                self.heredoc = None;
+            }
+            return Class::Str;
+        }
         let mut saw_string = self.open.is_some(); // an empty or whitespace-only line inside a multi-line string is code
         let (mut saw_code, mut saw_comment) = (false, false);
         let mut i = pos;
 
-        if lang.zig_line_string && self.open.is_none() {
+        if self.lang.zig_line_string && self.open.is_none() {
             let mut j = pos;
             while j < end && WHITESPACE[buf[j] as usize] {
                 j += 1;
@@ -135,6 +171,7 @@ impl<'a> Scanner<'a> {
         }
 
         while i < end {
+            let lang = self.lang;
             if let Some(open) = self.open {
                 saw_string = true;
                 if let Open::Raw(hashes) = open {
@@ -199,15 +236,60 @@ impl<'a> Scanner<'a> {
                 continue;
             }
 
+            if let Some(ri) = self.pending_region {
+                // inside <tag …>: the region body begins after the >
+                saw_code = true;
+                match buf[i..end].iter().position(|&b| b == b'>') {
+                    Some(k) => {
+                        i += k + 1;
+                        self.region = Some(lang.regions[ri].tag);
+                        self.lang = &LANGS[lang.region_langs[ri]];
+                        self.pending_region = None;
+                    }
+                    None => i = end,
+                }
+                continue;
+            }
+
             let b = buf[i];
-            if !lang.starts[b as usize] {
+            let in_region = self.region.is_some();
+            if !lang.starts[b as usize] && !(in_region && b == b'<') {
                 // plain code: skip the whole run
                 saw_code = true;
                 i += 1;
-                while i < end && !lang.starts[buf[i] as usize] {
+                while i < end && !lang.starts[buf[i] as usize] && !(in_region && buf[i] == b'<') {
                     i += 1;
                 }
                 continue;
+            }
+            if b == b'<' {
+                if let Some(tag) = self.region
+                    && closes_region(buf, i, end, tag)
+                {
+                    self.lang = self.outer;
+                    self.region = None;
+                    i = buf[i..end]
+                        .iter()
+                        .position(|&c| c == b'>')
+                        .map_or(end, |k| i + k + 1);
+                    saw_code = true;
+                    continue;
+                }
+                if let Some(ri) = opens_region(buf, i, end, lang) {
+                    self.outer = lang;
+                    self.pending_region = Some(ri);
+                    saw_code = true;
+                    i += 1 + lang.regions[ri].tag.len();
+                    continue;
+                }
+                if lang.heredoc != Heredoc::None
+                    && let Some((heredoc, after)) = heredoc_opener(buf, i, end, lang.heredoc)
+                {
+                    self.heredoc = Some(heredoc);
+                    saw_code = true;
+                    i = after;
+                    continue;
+                }
             }
             let interp = !self.interp.is_empty();
             match b {
@@ -327,6 +409,72 @@ impl<'a> Scanner<'a> {
 
 fn blank(line: &[u8]) -> bool {
     line.iter().all(|&b| WHITESPACE[b as usize])
+}
+
+// Whether the byte at buf[i] ends a tag name: the line's end, whitespace, or one of the given bytes.
+fn tag_boundary(buf: &[u8], i: usize, end: usize, also: &[u8]) -> bool {
+    i >= end || WHITESPACE[buf[i] as usize] || also.contains(&buf[i])
+}
+
+// The region whose opening tag <tag begins at buf[i], compared without regard to ASCII case.
+fn opens_region(buf: &[u8], i: usize, end: usize, lang: &Lang) -> Option<usize> {
+    lang.regions.iter().position(|region| {
+        starts_with_ci(buf, i + 1, end, region.tag)
+            && tag_boundary(buf, i + 1 + region.tag.len(), end, b">/")
+    })
+}
+
+// Whether </tag begins at buf[i].
+fn closes_region(buf: &[u8], i: usize, end: usize, tag: &[u8]) -> bool {
+    starts_with(buf, i, end, b"</")
+        && starts_with_ci(buf, i + 2, end, tag)
+        && tag_boundary(buf, i + 2 + tag.len(), end, b">")
+}
+
+// A heredoc opener at buf[i]: << then, by style, - or ~ for an indented terminator, spaces (Shell), a quote or backslash around the word, and the word itself; returns it and where the opener ends. <<< is not one.
+fn heredoc_opener(
+    buf: &[u8],
+    i: usize,
+    end: usize,
+    style: Heredoc,
+) -> Option<(OpenHeredoc, usize)> {
+    if !starts_with(buf, i, end, b"<<") || (i + 2 < end && buf[i + 2] == b'<') {
+        return None;
+    }
+    let mut j = i + 2;
+    let mut indented = false;
+    if j < end && (buf[j] == b'-' || (style == Heredoc::Ruby && buf[j] == b'~')) {
+        indented = true;
+        j += 1;
+    }
+    if style == Heredoc::Shell {
+        while j < end && WHITESPACE[buf[j] as usize] {
+            j += 1;
+        }
+    }
+    let mut quote = None;
+    if j < end && matches!(buf[j], b'\'' | b'"' | b'`') {
+        quote = Some(buf[j]);
+        j += 1;
+    } else if style == Heredoc::Shell && j < end && buf[j] == b'\\' {
+        j += 1;
+    }
+    let start = j;
+    while j < end && (buf[j].is_ascii_alphanumeric() || buf[j] == b'_') {
+        j += 1;
+    }
+    if start == j {
+        return None;
+    }
+    let word = buf[start..j].to_vec();
+    if let Some(q) = quote {
+        if j < end && buf[j] == q {
+            j += 1;
+        } else {
+            return None;
+        }
+    }
+    Some((OpenHeredoc { word, indented }, j))
 }
 
 // A raw string opener r#*" (optionally b-prefixed) at buf[i]: its hash count and where it ends.

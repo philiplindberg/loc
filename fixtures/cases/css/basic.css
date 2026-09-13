@@ -1,0 +1,6 @@
+/* block
+   comment */
+a { color: red; } /* trailing */
+b { content: "/* not a comment */"; }
+
+c { }

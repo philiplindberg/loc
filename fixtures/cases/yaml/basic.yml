@@ -1,0 +1,4 @@
+# comment
+key: value # trailing
+str: "a # not a comment"
+lit: 'it''s'

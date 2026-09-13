@@ -1,0 +1,2 @@
+# rc
+alias l=ls
