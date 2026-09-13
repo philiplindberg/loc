@@ -67,7 +67,6 @@ fn help_exits_0_and_usage_errors_exit_1() {
     assert_eq!(code(&run(&["--bogus"], &s.0)), 1);
     assert_eq!(code(&run(&["--jobs", "0"], &s.0)), 1);
     assert_eq!(code(&run(&["--jobs"], &s.0)), 1);
-    assert_eq!(code(&run(&["a", "b"], &s.0)), 1);
 }
 
 #[test]
@@ -160,4 +159,137 @@ fn a_symlink_inside_a_walk_is_neither_followed_nor_counted() {
         "{}",
         stdout(&out)
     );
+}
+
+fn files_of(json: &str, language: &str) -> usize {
+    let key = format!("\"name\":\"{language}\",\"files\":");
+    json.find(&key).map_or(0, |i| {
+        let rest = &json[i + key.len()..];
+        rest[..rest.find(',').unwrap()].parse().unwrap()
+    })
+}
+
+#[test]
+fn help_matches_the_spec() {
+    let spec = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/SPEC.md")).unwrap();
+    let section = &spec[spec.find("## Command line").unwrap()..];
+    let start = section.find("```\n").unwrap() + 4;
+    let block = &section[start..start + section[start..].find("```").unwrap()];
+    let s = Scratch::new();
+    assert_eq!(stdout(&run(&["--help"], &s.0)), block);
+}
+
+#[test]
+fn several_paths_sum_and_a_file_reached_twice_counts_once() {
+    let s = Scratch::new();
+    s.file("src/main.rs", "x\n");
+    s.file("src/lib/b.rs", "y\n");
+    s.file("other/c.rs", "z\n");
+    let count = |args: &[&str]| files_of(&stdout(&run(args, &s.0)), "Rust");
+    assert_eq!(count(&["--json", "src", "other"]), 3);
+    assert_eq!(count(&["--json", "src", "src/lib"]), 2);
+    assert_eq!(count(&["--json", "src", "src"]), 2);
+    assert_eq!(count(&["--json", "src/main.rs", "src/main.rs"]), 1);
+    assert_eq!(count(&["--json", "src/main.rs", "src"]), 2);
+}
+
+#[test]
+fn a_missing_path_among_several_exits_2_with_no_output() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    let out = run(&["--json", "a.rs", "nope"], &s.0);
+    assert_eq!(code(&out), 2);
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn double_dash_ends_the_flags() {
+    let s = Scratch::new();
+    s.file("-weird/a.rs", "x\n");
+    assert_eq!(code(&run(&["--json", "-weird"], &s.0)), 1);
+    assert_eq!(
+        files_of(&stdout(&run(&["--json", "--", "-weird"], &s.0)), "Rust"),
+        1
+    );
+}
+
+#[test]
+fn exclude_matches_like_a_gitignore_line() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    s.file("vendor/v.rs", "x\n");
+    s.file("sub/vendor/w.rs", "x\n");
+    s.file("d/x.rs", "x\n");
+    s.file("other/d", "x\n");
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    assert_eq!(files_of(&json(&["--json", "."]), "Rust"), 4);
+    assert_eq!(
+        files_of(&json(&["--json", "--exclude", "vendor", "."]), "Rust"),
+        2
+    );
+    assert_eq!(
+        files_of(&json(&["--json", "--exclude=/vendor", "."]), "Rust"),
+        3
+    );
+    let dir_only = json(&["--json", "--exclude", "d/", "."]);
+    assert_eq!(files_of(&dir_only, "Rust"), 3);
+    assert!(
+        dir_only.contains("\"label\":\"d\",\"files\":1,"),
+        "{dir_only}"
+    );
+    assert_eq!(
+        files_of(
+            &json(&["--json", "--exclude", "vendor", "--exclude", "d", "."]),
+            "Rust"
+        ),
+        1
+    );
+}
+
+#[test]
+fn exclude_decides_before_gitignore_and_applies_with_no_ignore() {
+    let s = Scratch::new();
+    s.file(".gitignore", "*.md\n");
+    s.file("keep.md", "x\n");
+    s.file("notes.md", "x\n");
+    s.file("a.rs", "x\n");
+    s.file("vendor/v.rs", "x\n");
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    assert_eq!(files_of(&json(&["--json", "."]), "Markdown"), 0);
+    assert_eq!(
+        files_of(&json(&["--json", "--exclude", "!keep.md", "."]), "Markdown"),
+        1
+    );
+    let no_ignore = json(&["--json", "--no-ignore", "--exclude", "vendor", "."]);
+    assert_eq!(files_of(&no_ignore, "Markdown"), 2);
+    assert_eq!(files_of(&no_ignore, "Rust"), 1);
+}
+
+#[test]
+fn exclude_is_relative_to_each_path_and_never_path_itself() {
+    let s = Scratch::new();
+    for root in ["a", "b"] {
+        s.file(&format!("{root}/vendor/x.rs"), "x\n");
+        s.file(&format!("{root}/y.rs"), "x\n");
+    }
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    assert_eq!(
+        files_of(&json(&["--json", "--exclude", "/vendor", "a", "b"]), "Rust"),
+        2
+    );
+    assert_eq!(
+        files_of(
+            &json(&["--json", "--exclude", "vendor", "a/vendor"]),
+            "Rust"
+        ),
+        1
+    );
+}
+
+#[test]
+fn exclude_without_a_pattern_is_a_usage_error() {
+    let s = Scratch::new();
+    assert_eq!(code(&run(&["--exclude"], &s.0)), 1);
+    assert_eq!(code(&run(&["--exclude=", "."], &s.0)), 1);
+    assert_eq!(code(&run(&["--exclude=vendor", "."], &s.0)), 0);
 }

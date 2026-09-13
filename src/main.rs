@@ -10,12 +10,13 @@ use report::Report;
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, ErrorKind, IsTerminal, Write};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
 macro_rules! usage {
     () => {
-        "usage: loc [--json] [--no-color] [--no-ignore] [--jobs N] [PATH]"
+        "usage: loc [--json] [--no-color] [--no-ignore] [--exclude PATTERN]... [--jobs N] [PATH...]"
     };
 }
 
@@ -25,13 +26,14 @@ const HELP: &str = concat!(
     usage!(),
     "
 
-Count lines of code per language under PATH (default: the current directory).
+Count lines of code per language under each PATH (default: the current directory).
 
-  --json        print the report as JSON
-  --no-color    plain output even on a terminal
-  --no-ignore   count files that .gitignore excludes
-  --jobs N      threads that read and count files (default: all cores)
-  -h, --help    show this help
+  --json               print the report as JSON
+  --no-color           plain output even on a terminal
+  --no-ignore          count files that .gitignore excludes
+  --exclude PATTERN    skip what this .gitignore line would, under every PATH; repeatable
+  --jobs N             threads that read and count files (default: all cores)
+  -h, --help           show this help
 "
 );
 
@@ -39,8 +41,9 @@ struct Options {
     json: bool,
     no_color: bool,
     no_ignore: bool,
+    excludes: Vec<Vec<u8>>,
     jobs: usize,
-    root: PathBuf,
+    roots: Vec<PathBuf>,
 }
 
 enum Exit {
@@ -53,52 +56,66 @@ fn parse(args: &[OsString]) -> Result<Options, Exit> {
         json: false,
         no_color: false,
         no_ignore: false,
+        excludes: Vec::new(),
         jobs: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
-        root: PathBuf::from("."),
+        roots: Vec::new(),
     };
-    if args.iter().any(|a| a == "-h" || a == "--help") {
-        // Anywhere on the line, before any other flag is judged.
+    let mut i = 0;
+    let mut flags = true; // until --
+    // -h or --help anywhere among the flags wins, before any other flag is judged.
+    if args
+        .iter()
+        .take_while(|a| *a != "--")
+        .any(|a| a == "-h" || a == "--help")
+    {
         return Err(Exit::Help);
     }
-    let mut paths: Vec<&OsString> = Vec::new();
-    let mut i = 0;
     while i < args.len() {
         let arg = args[i].to_string_lossy();
-        if arg == "--json" {
+        // The value of a flag that takes one: after = or in the next argument.
+        let value = |flag: &str, i: &mut usize| -> Option<OsString> {
+            if let Some(v) = arg.strip_prefix(flag).and_then(|r| r.strip_prefix('=')) {
+                Some(OsString::from(v))
+            } else {
+                *i += 1;
+                args.get(*i).cloned()
+            }
+        };
+        if !flags || !arg.starts_with('-') {
+            opts.roots.push(PathBuf::from(&args[i]));
+        } else if arg == "--" {
+            flags = false;
+        } else if arg == "--json" {
             opts.json = true;
         } else if arg == "--no-color" {
             opts.no_color = true;
         } else if arg == "--no-ignore" {
             opts.no_ignore = true;
+        } else if arg == "--exclude" || arg.starts_with("--exclude=") {
+            match value("--exclude", &mut i) {
+                Some(pattern) if !pattern.is_empty() => {
+                    opts.excludes.push(pattern.as_bytes().to_vec());
+                }
+                _ => return Err(Exit::Usage("loc: --exclude needs a pattern".to_string())),
+            }
         } else if arg == "--jobs" || arg.starts_with("--jobs=") {
-            let value = if let Some(v) = arg.strip_prefix("--jobs=") {
-                v.to_string()
-            } else {
-                i += 1;
-                args.get(i)
-                    .map(|v| v.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-            };
-            match value.parse::<usize>() {
-                Ok(n) if n >= 1 && !value.starts_with('+') => opts.jobs = n,
+            let text = value("--jobs", &mut i).unwrap_or_default();
+            let text = text.to_string_lossy();
+            match text.parse::<usize>() {
+                Ok(n) if n >= 1 && !text.starts_with('+') => opts.jobs = n,
                 _ => {
                     return Err(Exit::Usage(
                         "loc: --jobs needs a positive integer".to_string(),
                     ));
                 }
             }
-        } else if arg.starts_with('-') {
-            return Err(Exit::Usage(format!("loc: unknown flag {arg}")));
         } else {
-            paths.push(&args[i]);
+            return Err(Exit::Usage(format!("loc: unknown flag {arg}")));
         }
         i += 1;
     }
-    if paths.len() > 1 {
-        return Err(Exit::Usage(String::new()));
-    }
-    if let Some(path) = paths.first() {
-        opts.root = PathBuf::from(path);
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
     }
     Ok(opts)
 }
@@ -123,12 +140,23 @@ fn run(args: &[OsString]) -> i32 {
             return 1;
         }
     };
-    if let Err(err) = readable(&opts.root) {
-        eprintln!("loc: {}: {err}", opts.root.display());
+    let mut unreadable = false;
+    for root in &opts.roots {
+        if let Err(err) = readable(root) {
+            eprintln!("loc: {}: {err}", root.display());
+            unreadable = true;
+        }
+    }
+    if unreadable {
         return 2;
     }
 
-    let report = Report::new(walk::count_tree(&opts.root, opts.no_ignore, opts.jobs));
+    let report = Report::new(walk::count_trees(
+        &opts.roots,
+        opts.no_ignore,
+        &opts.excludes,
+        opts.jobs,
+    ));
     let out = if opts.json {
         report.json()
     } else {

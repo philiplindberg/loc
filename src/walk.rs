@@ -1,6 +1,6 @@
 // The walk and the pipeline. A walker thread streams paths into a channel as it finds them; workers read and count as they arrive; each worker's sums merge at the end. Walk order and worker count never affect output: every number is a sum.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::os::unix::ffi::OsStrExt;
@@ -9,7 +9,7 @@ use std::sync::mpsc::{Receiver, sync_channel};
 use std::sync::{Condvar, Mutex};
 use std::thread;
 
-use crate::ignore::{IgnoreFile, ancestors, ignored, offset_below, read_ignore};
+use crate::ignore::{IgnoreFile, ancestors, exclude_file, ignored, offset_below, read_ignore};
 use crate::lang::{LANGS, by_ext, by_name, by_shebang};
 use crate::scan::{Counts, scan};
 
@@ -116,7 +116,30 @@ fn add(group: &mut HashMap<String, Skipped>, label: String, files: usize, bytes:
     entry.bytes += bytes;
 }
 
-fn walk(root: &Path, no_ignore: bool, emit: &mut impl FnMut(PathBuf)) {
+// Walks every root in turn. With several roots a file is emitted once however many roots reach it: each root is resolved, and since links are never followed, a file has one path under a resolved root.
+fn walk_roots(
+    roots: &[PathBuf],
+    no_ignore: bool,
+    excludes: &[Vec<u8>],
+    emit: &mut impl FnMut(PathBuf),
+) {
+    let mut seen: Option<HashSet<PathBuf>> = (roots.len() > 1).then(HashSet::new);
+    for root in roots {
+        let resolved = fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+        let mut once = |path: PathBuf| {
+            let unique = match &mut seen {
+                Some(seen) => seen.insert(resolved.join(path.strip_prefix(root).unwrap_or(&path))),
+                None => true,
+            };
+            if unique {
+                emit(path);
+            }
+        };
+        walk(root, no_ignore, excludes, &mut once);
+    }
+}
+
+fn walk(root: &Path, no_ignore: bool, excludes: &[Vec<u8>], emit: &mut impl FnMut(PathBuf)) {
     if !fs::metadata(root).is_ok_and(|st| st.is_dir()) {
         return emit(root.to_path_buf());
     }
@@ -125,7 +148,8 @@ fn walk(root: &Path, no_ignore: bool, emit: &mut impl FnMut(PathBuf)) {
     } else {
         ancestors(root)
     };
-    walk_dir(root, &rel, &mut stack, no_ignore, emit);
+    let excludes = (!excludes.is_empty()).then(|| exclude_file(excludes, offset_below(&rel)));
+    walk_dir(root, &rel, &mut stack, excludes.as_ref(), no_ignore, emit);
 }
 
 // rel is the directory's path relative to the base the ignore files are measured from.
@@ -133,6 +157,7 @@ fn walk_dir(
     dir: &Path,
     rel: &[u8],
     stack: &mut Vec<IgnoreFile>,
+    excludes: Option<&IgnoreFile>,
     no_ignore: bool,
     emit: &mut impl FnMut(PathBuf),
 ) {
@@ -157,12 +182,12 @@ fn walk_dir(
                 }
                 let mut child_rel = prefix.clone();
                 child_rel.extend_from_slice(name.as_bytes());
-                if !no_ignore && ignored(stack, &child_rel, name.as_bytes(), kind.is_dir()) {
+                if ignored(excludes, stack, &child_rel, name.as_bytes(), kind.is_dir()) {
                     continue;
                 }
                 let path = entry.path();
                 if kind.is_dir() {
-                    walk_dir(&path, &child_rel, stack, no_ignore, emit);
+                    walk_dir(&path, &child_rel, stack, excludes, no_ignore, emit);
                 } else {
                     emit(path);
                 }
@@ -271,7 +296,7 @@ fn size_on_disk(path: &Path) -> u64 {
     fs::symlink_metadata(path).map_or(0, |m| m.len())
 }
 
-pub fn count_tree(root: &Path, no_ignore: bool, jobs: usize) -> Sums {
+pub fn count_trees(roots: &[PathBuf], no_ignore: bool, excludes: &[Vec<u8>], jobs: usize) -> Sums {
     let (tx, rx) = sync_channel::<PathBuf>(1024);
     let rx: Mutex<Receiver<PathBuf>> = Mutex::new(rx);
     let turns = Semaphore {
@@ -279,7 +304,7 @@ pub fn count_tree(root: &Path, no_ignore: bool, jobs: usize) -> Sums {
         changed: Condvar::new(),
     };
     thread::scope(|s| {
-        s.spawn(move || walk(root, no_ignore, &mut |path| drop(tx.send(path))));
+        s.spawn(move || walk_roots(roots, no_ignore, excludes, &mut |path| drop(tx.send(path))));
         let workers: Vec<_> = (0..jobs)
             .map(|_| {
                 s.spawn(|| {

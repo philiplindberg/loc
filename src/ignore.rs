@@ -192,24 +192,43 @@ pub fn read_ignore(dir: &Path, offset: usize) -> Option<IgnoreFile> {
         .map(|text| parse_ignore(&text, offset))
 }
 
-// The deepest file with a matching line decides, and within a file the last matching line.
-pub fn ignored(stack: &[IgnoreFile], rel: &[u8], name: &[u8], is_dir: bool) -> bool {
-    for file in stack.iter().rev() {
-        for pattern in file.patterns.iter().rev() {
-            if pattern.dir_only && !is_dir {
-                continue;
-            }
-            let subject = if pattern.anchored {
-                &rel[file.offset..]
-            } else {
-                name
-            };
-            if matches(&pattern.steps, subject) {
-                return !pattern.negate;
-            }
+// --exclude patterns as one ignore file, each pattern a line, measured from the directory at offset.
+pub fn exclude_file(patterns: &[Vec<u8>], offset: usize) -> IgnoreFile {
+    parse_ignore(&patterns.join(&b'\n'), offset)
+}
+
+// The status a file's lines give a path: that of the last matching line, or None when no line matches.
+fn decides(file: &IgnoreFile, rel: &[u8], name: &[u8], is_dir: bool) -> Option<bool> {
+    file.patterns.iter().rev().find_map(|pattern| {
+        if pattern.dir_only && !is_dir {
+            return None;
         }
-    }
-    false
+        let subject = if pattern.anchored {
+            &rel[file.offset..]
+        } else {
+            name
+        };
+        matches(&pattern.steps, subject).then_some(!pattern.negate)
+    })
+}
+
+// The --exclude patterns decide first; then the deepest file with a matching line, and within a file the last matching line.
+pub fn ignored(
+    excludes: Option<&IgnoreFile>,
+    stack: &[IgnoreFile],
+    rel: &[u8],
+    name: &[u8],
+    is_dir: bool,
+) -> bool {
+    excludes
+        .and_then(|file| decides(file, rel, name, is_dir))
+        .or_else(|| {
+            stack
+                .iter()
+                .rev()
+                .find_map(|file| decides(file, rel, name, is_dir))
+        })
+        .unwrap_or(false)
 }
 
 fn has_git(dir: &Path) -> bool {

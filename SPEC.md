@@ -5,20 +5,21 @@ Counts lines of source code per language across a directory tree. The program mu
 ## Command line
 
 ```
-usage: loc [--json] [--no-color] [--no-ignore] [--jobs N] [PATH]
+usage: loc [--json] [--no-color] [--no-ignore] [--exclude PATTERN]... [--jobs N] [PATH...]
 
-Count lines of code per language under PATH (default: the current directory).
+Count lines of code per language under each PATH (default: the current directory).
 
-  --json        print the report as JSON
-  --no-color    plain output even on a terminal
-  --no-ignore   count files that .gitignore excludes
-  --jobs N      threads that read and count files (default: all cores)
-  -h, --help    show this help
+  --json               print the report as JSON
+  --no-color           plain output even on a terminal
+  --no-ignore          count files that .gitignore excludes
+  --exclude PATTERN    skip what this .gitignore line would, under every PATH; repeatable
+  --jobs N             threads that read and count files (default: all cores)
+  -h, --help           show this help
 ```
 
-`-h` or `--help` anywhere on the command line prints exactly that to stdout and exits `0`; a usage error prints its first line to stderr. `PATH` defaults to `.`; more than one is a usage error. A path that is a file is counted as that file; a directory is walked recursively. `PATH` itself is followed if it is a symbolic link, so a link names its target; a symbolic link met inside a walk is neither followed nor counted. Hidden files and directories are included. An entry named `.git`, file or directory, is never counted, entered, or reported, with or without `--no-ignore`. `.gitignore` files are applied as described under Ignore rules unless `--no-ignore` is given. `--jobs` sets how many threads read and count files; the default is the machine's available parallelism. It bounds the counting threads, not the process: the walk may run beside them, and a runtime's own threads are outside it. A flag's value is given as `--jobs=N` or `--jobs N`. Neither the value nor visit order affects output: every number is a sum and the table is sorted.
+`-h` or `--help` anywhere on the command line prints exactly that to stdout and exits `0`; a usage error prints its first line to stderr. With no `PATH`, `.` is counted. Several may be given: each is counted as below and the sums merge, and a file reachable through more than one `PATH` is counted once. `--` ends the flags, so a `PATH` may begin with `-`. A path that is a file is counted as that file; a directory is walked recursively. `PATH` itself is followed if it is a symbolic link, so a link names its target; a symbolic link met inside a walk is neither followed nor counted. Hidden files and directories are included. An entry named `.git`, file or directory, is never counted, entered, or reported, with or without `--no-ignore`. `.gitignore` files are applied as described under Ignore rules unless `--no-ignore` is given; `--exclude` patterns are applied as described there in either case. `--jobs` sets how many threads read and count files; the default is the machine's available parallelism. It bounds the counting threads, not the process: the walk may run beside them, and a runtime's own threads are outside it. A flag's value is given as `--jobs=N` or `--jobs N`, and likewise for `--exclude`. Neither the value nor visit order affects output: every number is a sum and the table is sorted.
 
-Exit codes: `0` on success, `1` for a usage error (unknown flag, `--jobs` without a positive integer, more than one `PATH`), `2` if any `PATH` does not exist or cannot be read. A file inside a walk that cannot be read is skipped under the label `unreadable` with a warning on stderr and does not change the exit code; a directory that cannot be listed is skipped with a warning and counts nothing. The report goes to stdout; errors go to stderr.
+Exit codes: `0` on success, `1` for a usage error (unknown flag, `--jobs` without a positive integer, `--exclude` without a pattern), `2` if any `PATH` does not exist or cannot be read; every `PATH` is checked before anything is counted, so nothing is written to stdout in that case. A file inside a walk that cannot be read is skipped under the label `unreadable` with a warning on stderr and does not change the exit code; a directory that cannot be listed is skipped with a warning and counts nothing. The report goes to stdout; errors go to stderr.
 
 ## Output
 
@@ -80,6 +81,8 @@ Whitespace, for the purpose of the blank rule, is exactly these bytes: space, ta
 ## Ignore rules
 
 `.gitignore` files are applied as git applies them, within the subset below, unless `--no-ignore` is given. An ignored file is not counted and not reported: it is absent from the table, from `skipped`, and from the skipped section's file total. An ignored directory is not entered, so nothing beneath it is counted, reported, or re-included by a later `!` line. `PATH` itself is never ignored.
+
+**`--exclude`.** Each `--exclude PATTERN` is one `.gitignore` line, read by the rules below, applied under every `PATH` as if it stood in a `.gitignore` in that `PATH`, except that the patterns are decided first: the last matching `--exclude` decides a path's status, and only when none matches do the `.gitignore` files apply. So `--exclude '!keep.md'` re-includes what a file excluded. The patterns apply with `--no-ignore` too. `PATH` itself is never excluded.
 
 **Which files apply.** A `.gitignore` in a walked directory applies to that directory and everything beneath it. When an ancestor of `PATH` (or `PATH` itself) contains an entry named `.git`, the `.gitignore` files in the nearest such ancestor and in every directory between it and `PATH` apply the same way, so `loc src` inside a repository ignores what `loc .` would. Nothing above the nearest `.git` is read. `.git/info/exclude`, global excludes, `.ignore`, and tool-specific ignore files are not read. Rules apply to every file on disk; whether git tracks a file is not consulted.
 
