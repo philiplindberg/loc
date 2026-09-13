@@ -1,10 +1,11 @@
 # loc
 
-Counts lines of code across a directory tree in 33 languages. Honors `.gitignore` and `--exclude` patterns, skips binaries and symlinks, prints a table on a terminal or JSON with `--json`. The rules are in `SPEC.md`; `fixtures/` pins them.
+Counts lines of code across a directory tree in 34 languages. Honors `.gitignore` and `--exclude` patterns, skips binaries and symlinks, prints a table on a terminal or JSON with `--json`. The rules are in `SPEC.md`; `fixtures/` pins them.
 
 | Language | Files |
 |---|---|
 | C | `.c` `.h` |
+| C# | `.cs` |
 | C++ | `.cpp` `.cc` `.cxx` `.hpp` `.hh` `.hxx` |
 | CoffeeScript | `.coffee`, `#!` `coffee` |
 | CSS | `.css` |

@@ -594,6 +594,23 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
             ..NONE
         },
         Lang {
+            name: "C#",
+            extensions: &[".cs"],
+            line: &[b"//"],
+            block_open: b"/*",
+            block_close: b"*/",
+            strings: vec![
+                kind(b"\"\"\"", b"\"\"\"", false, true),
+                kind(b"@$\"", b"\"", false, true),
+                kind(b"$@\"", b"\"", false, true),
+                kind(b"@\"", b"\"", false, true),
+                DQ,
+            ],
+            chars: Chars::Always,
+            color: [0x73, 0x55, 0xdd],
+            ..NONE
+        },
+        Lang {
             name: "XML",
             extensions: &[".xml", ".xsd", ".xsl", ".xslt"],
             block_open: b"<!--",

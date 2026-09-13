@@ -9,6 +9,7 @@
 {"path":"cpp/ext.hh","language":"C++","lines":1,"blank":0,"comment":0,"code":1},
 {"path":"cpp/ext.hpp","language":"C++","lines":1,"blank":0,"comment":0,"code":1},
 {"path":"cpp/ext.hxx","language":"C++","lines":1,"blank":0,"comment":0,"code":1},
+{"path":"csharp/basic.cs","language":"C#","lines":12,"blank":0,"comment":3,"code":9},
 {"path":"css/basic.css","language":"CSS","lines":6,"blank":1,"comment":2,"code":3},
 {"path":"dart/basic.dart","language":"Dart","lines":6,"blank":0,"comment":2,"code":4},
 {"path":"edge/.hidden.js","language":"JavaScript","lines":1,"blank":0,"comment":1,"code":0},
