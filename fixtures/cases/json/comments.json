@@ -1,0 +1,4 @@
+{
+  // comment
+  "url": "http://x" /* trailing */
+}

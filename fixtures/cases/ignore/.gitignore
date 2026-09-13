@@ -1,0 +1,16 @@
+#c.ts
+
+*.md
+!keep.md
+/root-only.ts
+build/
+!inside.ts
+sub/gen/
+**/deep.go
+vendor/**
+a/**/b.rs
+file?.py
+[ab].zig
+\#hash.json
+spaced.js   
+*.log
