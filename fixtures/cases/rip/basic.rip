@@ -1,0 +1,7 @@
+# a line comment
+x = 1 # trailing comment
+###
+block comment
+###
+
+y = "str # not a comment"

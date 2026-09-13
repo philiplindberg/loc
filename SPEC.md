@@ -51,7 +51,7 @@ Shares are to one decimal, computed in integers: `tenths = (part × 1000 + whole
 
 Skipped files are grouped by label: the lower-cased extension with its dot; `(none)` for a file whose name has no `.` after its first character; `binary` for a recognized file rejected by the `NUL` check, whatever its extension; `unreadable` for a file that could not be opened. Labels sort by file count descending, then label ascending compared byte-wise. The section opens with `S of A files skipped (P%)`, where `A` is recognized plus skipped files and `P` is the skipped share of `A`. With at least one label it continues with a second table, columns `Skipped`, `Files`, `%`: at most ten labels, and with more than ten a final row labeled `N more labels` carrying the file count of the labels not shown; `%` is the row's share of `A`. With nothing skipped the section is the opening line alone. Output ends with a newline.
 
-**Styling.** When stdout is a terminal, `NO_COLOR` is unset or empty, `TERM` is not `dumb`, and `--no-color` was not given, the output is styled; otherwise it is exactly the plain text above. Styled, the first column of the language table carries a two-cell prefix: on a language row, `●` (U+25CF) in the language's color and a space; on the header and total row, two spaces. Widths and rules include the prefix, so the styled table is two columns wider than the plain one. The header line and total row are wrapped in `ESC[1m` … `ESC[0m` (bold); the four rules and every line of the skipped section are wrapped in `ESC[2m` … `ESC[0m` (dim). A color is the 24-bit foreground sequence `ESC[38;2;R;G;Bm`, closed by `ESC[0m`; the values are in the language table.
+**Styling.** When stdout is a terminal, `NO_COLOR` is unset or empty, `TERM` is not `dumb`, and `--no-color` was not given, the output is styled; otherwise it is exactly the plain text above. Styled, the first column of the language table carries a two-cell prefix: on a language row, `●` (U+25CF) in the language's color and a space; on the header and total row, two spaces. Widths and rules include the prefix, so the styled table is two columns wider than the plain one. The header line and total row are wrapped in `ESC[1m` … `ESC[0m` (bold); the four rules and every line of the skipped section are wrapped in `ESC[2m` … `ESC[0m` (dim). A color is the 24-bit foreground sequence `ESC[38;2;R;G;Bm`, closed by `ESC[0m`; the values are in the language table. A terminal that enforces a minimum contrast for text, as VS Code's does by default, lightens a dark dot; the bar is background paint and always shows the exact color.
 
 When total code is non-zero, a language bar precedes the top rule on its own line, as wide as the rule: one segment per language with code, in table order, each a run of spaces on the language's color as background (`ESC[48;2;R;G;Bm` … `ESC[0m`), touching. Every segment gets one cell; with `spare` the width minus the number of segments, each then gets `floor(code × spare ÷ total_code)` more, and the cells still unfilled go one per segment in descending order of `(code × spare) mod total_code`, ties in table order. There is no bar when the segments outnumber the cells.
 
@@ -100,17 +100,19 @@ Markdown has no comment or string syntax, so its lines are blank or code.
 
 ## Scanner
 
-Classification needs one pass over the file's bytes tracking three states: inside a line comment, inside a block comment (with a depth for languages that nest), or inside a string of a given kind. Inside a comment, string delimiters are text. Inside a string, comment markers are text. Where two openers share a prefix (`"` and `"""`, `/` and `//` and `/*`, `r"` and `r#"`), the longest match wins. Outside a string or comment, a backslash escapes the byte after it and is code; it never extends past the newline.
+Classification needs one pass over the file's bytes tracking three states: inside a line comment, inside a block comment (with a depth for languages that nest), or inside a string of a given kind. Inside a comment, string delimiters are text. Inside a string, comment markers are text. Where two openers share a prefix (`"` and `"""`, `/` and `//` and `/*`, `r"` and `r#"`, `#` and `###`), the longest match wins. A block opener that is a run of one byte (`###`) does not match inside a longer run, so `####` opens a line comment. A language may allow a block comment to open only as the first non-whitespace bytes of a line; elsewhere its opener is read by the other rules, so a mid-line `###` in Rip opens a line comment. Outside a string or comment, a backslash escapes the byte after it and is code; it never extends past the newline.
 
 **Strings.** Each string kind has an opening sequence, a closing sequence, whether backslash escapes the next byte, and whether it may span lines. An unterminated single-line string ends at the newline and the scanner returns to normal state; a backslash immediately before the newline does not extend it. This bounds the damage of a stray quote to one line.
 
-**Template literals** (TypeScript, JavaScript). Inside a template literal, `${` enters code until the matching `}`, counting nested braces; the template resumes after it. Code inside an interpolation may open strings, comments, regex literals, and further template literals, each tracked the same way. `\${` is text.
+**Interpolation.** Some string kinds interpolate: inside one, an interpolation opener enters code until the matching `}`, counting nested braces; the string resumes after it. The openers are `${` in a TypeScript or JavaScript template literal, `#{` and `${` in a Rip `"…"` string or `"""…"""` heredoc, and `#{` in a Rip heregex. Code inside an interpolation may open strings, comments, regex literals, and further interpolating strings, each tracked the same way. An escaped opener (`\${`, `\#{`) is text.
 
 **Char literals** (Go, Rust, Zig) are single-line string kinds delimited by `'` with escapes. In Go and Zig every `'` outside a string or comment opens one. In Rust, `'` also introduces lifetimes and labels (`'a`, `'outer:`), which have no closing quote, so `'` opens a char literal only if the next byte is `\`, or the byte after the next is `'`; otherwise it is not a delimiter.
 
-**TypeScript and JavaScript regex literals** are single-line string kinds delimited by `/`. A `/` whose next byte is not `/` or `*` opens one in three cases: there is no previous non-whitespace byte on the line; the previous non-whitespace byte is one of `( , = : [ ! & | ? { } ; + - * % < > ~ ^`; or the previous non-whitespace byte ends a word — read back over letters, digits, `_`, and `$` — and that whole word is one of `return typeof instanceof in of new delete void throw case do else yield await`. It closes at the next `/` that is not escaped and not inside a `[...]` class. This is a heuristic; the fixtures pin the cases it must get right.
+**TypeScript, JavaScript, and Rip regex literals** are single-line string kinds delimited by `/`. A `/` that no comment opener or string kind has claimed opens one in three cases: there is no previous non-whitespace byte on the line; the previous non-whitespace byte is one of `( , = : [ ! & | ? { } ; + - * % < > ~ ^`; or the previous non-whitespace byte ends a word — read back over letters, digits, `_`, and `$` — and that whole word is one of the language's regex words: `return typeof instanceof in of new delete void throw case do else yield await` in TypeScript and JavaScript, and those plus `if unless when while until and or not is isnt then` in Rip. It closes at the next `/` that is not escaped and not inside a `[...]` class. This is a heuristic; the fixtures pin the cases it must get right.
 
 **Zig line strings.** A line whose first non-whitespace bytes are `\\` is a string line from there to the newline. No closing delimiter; each line stands alone.
+
+**Rip heregexes** `///…///` are multi-line string kinds with escapes and `#{` interpolation. A `#` comment inside one is string text, so its line is code.
 
 **Python string prefixes** (`r`, `b`, `f`, `u`, and their combinations, any case) immediately before a quote are part of the string opener and change nothing about classification. Backslash escapes apply in all Python string kinds, including raw strings, because `r"\""` is a valid literal containing `\"`.
 
@@ -130,10 +132,11 @@ Classification needs one pass over the file's bytes tracking three states: insid
 | Markdown | `.md` `.markdown` | none | none | — | none | `#519aba` |
 | C | `.c` `.h` | `//` | `/* */` | no | `"…"` single, escapes; `'…'` char | `#555555` |
 | C++ | `.cpp` `.cc` `.cxx` `.hpp` `.hh` `.hxx` | `//` | `/* */` | no | identical to C | `#f34b7d` |
+| Rip | `.rip` | `#` | `### ###`, at line start only | no | `"…"` single, escapes, `#{}` `${}` interpolation; `'…'` single, escapes; `"""…"""` multi, escapes, `#{}` `${}` interpolation; `'''…'''` multi, escapes; heregex `///…///` multi, escapes, `#{}` interpolation; regex `/…/` | `#ab2317` |
 
-Colors are GitHub linguist's, except JSON and Markdown, whose linguist colors are unreadable on a dark background and take Seti's.
+Colors are GitHub linguist's, except JSON and Markdown, whose linguist colors are unreadable on a dark background and take Seti's, and Rip, which linguist does not list.
 
-`///` and `//!` begin with `//` and are comments. A `#!` shebang line is a comment in Python, where `#` opens a comment, and code in TypeScript and JavaScript, where it does not; there is no special case. Rust `"…"` may span lines; the single-line kinds of TypeScript, JavaScript, Go, Zig, and Python may not. Doc comments and docstrings get no special treatment.
+`///` and `//!` begin with `//` and are comments. A `#!` shebang line is a comment in Python and Rip, where `#` opens a comment, and code in TypeScript and JavaScript, where it does not; there is no special case. Rust `"…"` may span lines; the single-line kinds of TypeScript, JavaScript, Go, Zig, Python, and Rip may not. Doc comments and docstrings get no special treatment.
 
 ## Known limitations
 
@@ -143,11 +146,13 @@ The regex rule sees bytes, not grammar: a regex directly after `)` (`if (x) /re/
 
 Ignore matching diverges from git in three places. Rules are applied to tracked files too, so a rule that git ignores for a committed tree, such as the `internal/` line in TypeScript's `.gitignore`, removes that tree from the count; `--no-ignore` restores it. Matching is case-sensitive where git on a case-insensitive filesystem is not. POSIX classes such as `[[:alpha:]]` are not recognized: the bracket is read as a literal set.
 
+In a Rip render block, a line whose first non-whitespace bytes are `#` and a letter names an element (`#main`); the scanner reads it as a comment. Word arrays (`%w[…]`) are not parsed: a `#` or quote inside one opens a phantom that ends at the newline. `//` is floor division in Rip, never a comment.
+
 A `.h` file is C, as GitHub linguist classifies it, whatever language its neighbors are in. C++ raw string literals (`R"(…)"`) are not parsed: the scanner sees an ordinary `"` string, single-line, so a quote inside one opens a phantom that ends at the newline. A filename that is not valid UTF-8 is matched by its bytes.
 
 ## Non-goals
 
-git's index, `.git/info/exclude`, global excludes, `.ignore` and tool-specific ignore files, submodules, encoding detection beyond the `NUL` check, per-file output, COCOMO estimates, complexity metrics, languages beyond the ten above.
+git's index, `.git/info/exclude`, global excludes, `.ignore` and tool-specific ignore files, submodules, encoding detection beyond the `NUL` check, per-file output, COCOMO estimates, complexity metrics, languages beyond the eleven above.
 
 ## Conformance
 

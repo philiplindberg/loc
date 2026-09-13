@@ -31,22 +31,6 @@ const fn byte_set(bytes: &[u8]) -> [bool; 256] {
 
 static REGEX_PREV: [bool; 256] = byte_set(b"(,=:[!&|?{};+-*%<>~^");
 static WHITESPACE: [bool; 256] = byte_set(b" \t\r\x0c\x0b");
-const REGEX_KEYWORDS: [&[u8]; 14] = [
-    b"return",
-    b"typeof",
-    b"instanceof",
-    b"in",
-    b"of",
-    b"new",
-    b"delete",
-    b"void",
-    b"throw",
-    b"case",
-    b"do",
-    b"else",
-    b"yield",
-    b"await",
-];
 
 fn is_ident(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
@@ -70,7 +54,7 @@ struct Scanner<'a> {
     buf: &'a [u8],
     block_depth: usize,
     open: Option<Open>,
-    interp: Vec<usize>, // brace depth of each open ${…}, innermost last
+    interp: Vec<(usize, usize)>, // string kind and brace depth of each open interpolation, innermost last
 }
 
 pub fn scan(buf: &[u8], lang: &Lang) -> Counts {
@@ -177,14 +161,12 @@ impl<'a> Scanner<'a> {
                 let b = buf[i];
                 if kind.escape && b == b'\\' {
                     i += 2;
-                } else if Some(open) == lang.template.map(Open::Kind)
-                    && b == b'$'
-                    && i + 1 < end
-                    && buf[i + 1] == b'{'
+                } else if let Open::Kind(ki) = open
+                    && let Some(opener) = kind.interp.iter().find(|o| starts_with(buf, i, end, o))
                 {
-                    self.interp.push(0);
+                    self.interp.push((ki, 0));
                     self.open = None;
-                    i += 2;
+                    i += opener.len();
                 } else if starts_with(buf, i, end, kind.close) {
                     self.open = None;
                     i += kind.close.len();
@@ -236,31 +218,33 @@ impl<'a> Scanner<'a> {
                     i += 2;
                 }
                 b'{' if interp => {
-                    *self.interp.last_mut().unwrap() += 1;
+                    self.interp.last_mut().unwrap().1 += 1;
                     saw_code = true;
                     i += 1;
                 }
                 b'}' if interp => {
-                    let depth = self.interp.last_mut().unwrap();
-                    if *depth == 0 {
-                        // back into the template
+                    let last = self.interp.last_mut().unwrap();
+                    if last.1 == 0 {
+                        // back into the string
+                        let ki = last.0;
                         self.interp.pop();
-                        self.open = lang.template.map(Open::Kind);
+                        self.open = Some(Open::Kind(ki));
                         saw_string = true;
                     } else {
-                        *depth -= 1;
+                        last.1 -= 1;
                         saw_code = true;
                     }
                     i += 1;
                 }
-                _ if !lang.line.is_empty() && starts_with(buf, i, end, lang.line) => {
-                    saw_comment = true;
-                    i = end;
-                }
-                _ if !lang.block_open.is_empty() && starts_with(buf, i, end, lang.block_open) => {
+                // the block opener is tried first: where it extends the line opener (`###` and `#`), the longest match wins
+                _ if self.opens_block(pos, i, end) => {
                     self.block_depth = 1;
                     saw_comment = true;
                     i += lang.block_open.len();
+                }
+                _ if !lang.line.is_empty() && starts_with(buf, i, end, lang.line) => {
+                    saw_comment = true;
+                    i = end;
                 }
                 b'b' | b'r'
                     if lang.rust_raw
@@ -287,8 +271,10 @@ impl<'a> Scanner<'a> {
                     }
                     i += 1;
                 }
-                // the next byte is not / or *, which the comment openers took
-                b'/' if lang.regex && regex_opens(buf, pos, i) => {
+                // a / the comment openers and string kinds did not claim
+                b'/' if let Some(words) = lang.regex
+                    && regex_opens(buf, pos, i, words) =>
+                {
                     i = regex_end(buf, i + 1, end);
                     saw_string = true;
                 }
@@ -316,6 +302,19 @@ impl<'a> Scanner<'a> {
         } else {
             Class::Code
         }
+    }
+
+    // Whether a block comment opens at buf[i] on the line starting at pos: the opener is there, it is the first non-whitespace of the line where the language requires that, and an opener that is a run of one byte is not inside a longer run (`####` is a line comment).
+    fn opens_block(&self, pos: usize, i: usize, end: usize) -> bool {
+        let open = self.lang.block_open;
+        if open.is_empty() || !starts_with(self.buf, i, end, open) {
+            return false;
+        }
+        if self.lang.block_at_line_start && !blank(&self.buf[pos..i]) {
+            return false;
+        }
+        let run = open.iter().all(|&b| b == open[0]);
+        !(run && i + open.len() < end && self.buf[i + open.len()] == open[0])
     }
 
     fn open_string(&self, i: usize, end: usize) -> Option<usize> {
@@ -348,8 +347,8 @@ fn rust_raw_opener(buf: &[u8], i: usize, end: usize) -> Option<(usize, usize)> {
     Some((hashes, j + 1))
 }
 
-// The previous-byte-or-keyword rule for a / at buf[i] on the line starting at line_start.
-fn regex_opens(buf: &[u8], line_start: usize, i: usize) -> bool {
+// The previous-byte-or-word rule for a / at buf[i] on the line starting at line_start.
+fn regex_opens(buf: &[u8], line_start: usize, i: usize, words: &[&[u8]]) -> bool {
     let mut j = i;
     while j > line_start && WHITESPACE[buf[j - 1] as usize] {
         j -= 1;
@@ -368,7 +367,7 @@ fn regex_opens(buf: &[u8], line_start: usize, i: usize) -> bool {
     while k > line_start && is_ident(buf[k - 1]) {
         k -= 1;
     }
-    REGEX_KEYWORDS.contains(&&buf[k..j])
+    words.contains(&&buf[k..j])
 }
 
 fn regex_end(buf: &[u8], mut i: usize, end: usize) -> usize {

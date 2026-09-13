@@ -10,27 +10,27 @@ use std::sync::{Condvar, Mutex};
 use std::thread;
 
 use crate::ignore::{IgnoreFile, ancestors, ignored, offset_below, read_ignore};
-use crate::lang::{LANGS, NUM_LANGS, by_ext};
+use crate::lang::{LANGS, by_ext};
 use crate::scan::{Counts, scan};
 
 // Sums kept by one worker: per-language totals by language index, and skipped files by label.
 pub struct Sums {
-    pub langs: [Counts; NUM_LANGS],
-    pub files: [usize; NUM_LANGS],
+    pub langs: Vec<Counts>,
+    pub files: Vec<usize>,
     pub skipped: HashMap<String, usize>,
 }
 
 impl Sums {
     fn new() -> Sums {
         Sums {
-            langs: [Counts::default(); NUM_LANGS],
-            files: [0; NUM_LANGS],
+            langs: vec![Counts::default(); LANGS.len()],
+            files: vec![0; LANGS.len()],
             skipped: HashMap::new(),
         }
     }
 
     fn add(&mut self, other: &Sums) {
-        for i in 0..NUM_LANGS {
+        for i in 0..LANGS.len() {
             self.files[i] += other.files[i];
             self.langs[i] += other.langs[i];
         }

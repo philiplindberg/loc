@@ -1,0 +1,3 @@
+m = s =~ /"""/
+# after
+q = a // b # floor division, then a comment

@@ -1,0 +1,5 @@
+r = ///
+  # a comment inside a heregex is string text
+  \d+
+  ///g
+# after

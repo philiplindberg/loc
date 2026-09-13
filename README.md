@@ -1,6 +1,6 @@
 # loc
 
-Counts lines of code per language across a directory tree: TypeScript, JavaScript, Go, Rust, Zig, Python, JSON, Markdown, C, and C++. Honors `.gitignore`, skips binaries and symlinks, prints a table on a terminal or JSON with `--json`. The rules are in `SPEC.md`; `fixtures/` pins them.
+Counts lines of code per language across a directory tree: TypeScript, JavaScript, Go, Rust, Zig, Python, JSON, Markdown, C, C++, and Rip. Honors `.gitignore`, skips binaries and symlinks, prints a table on a terminal or JSON with `--json`. The rules are in `SPEC.md`; `fixtures/` pins them.
 
 ```
 cargo build --release

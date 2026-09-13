@@ -1,0 +1,7 @@
+#### four hashes is a line comment
+a = 1
+b = 2
+c = 3 ### mid-line is a line comment
+d = 4
+### one-line block ### # comment after the closer
+e = 5
