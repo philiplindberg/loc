@@ -10,6 +10,6 @@ loc PATH
 
 `loc` is a link to the release build, so every `cargo build --release` updates it and a debug build does not.
 
-`loc --json fixtures/cases` must equal `fixtures/expected.json` byte for byte, and `loc --json --no-ignore fixtures/cases` must equal `fixtures/expected-no-ignore.json`.
+`loc --json fixtures/cases` must equal `fixtures/expected.json` byte for byte, and `loc --json --no-ignore fixtures/cases` must equal `fixtures/expected-no-ignore.json`. `cargo test` checks both.
 
 Standard library only. Unix only: file names are handled as bytes.
