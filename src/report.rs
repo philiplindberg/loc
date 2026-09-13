@@ -335,6 +335,83 @@ impl Report {
     }
 }
 
+// The --languages table: every language a file can be recognized as, by name, with the extensions and file names it claims, in the language table's layout. A cell's items wrap onto continuation lines so no column exceeds WRAP characters.
+pub fn languages(styled: bool) -> String {
+    let style = |code: &str, text: String| {
+        if styled {
+            format!("{code}{text}{RESET}")
+        } else {
+            text
+        }
+    };
+    let prefix = if styled { "  " } else { "" };
+    let mut langs: Vec<&crate::lang::Lang> = LANGS
+        .iter()
+        .filter(|lang| {
+            !lang.extensions.is_empty() || !lang.names.is_empty() || !lang.shebangs.is_empty()
+        })
+        .collect();
+    langs.sort_by(|a, b| a.name.cmp(b.name));
+    // Each language becomes one or more physical rows; only the first carries the name.
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut first_row: Vec<usize> = Vec::new();
+    for lang in &langs {
+        let files: Vec<&str> = lang.extensions.iter().chain(lang.names).copied().collect();
+        let cells = [wrap(&files)];
+        let height = cells.iter().map(Vec::len).max().unwrap_or(0).max(1);
+        first_row.push(rows.len());
+        for line in 0..height {
+            let mut row = vec![if line == 0 {
+                format!("{prefix}{}", lang.name)
+            } else {
+                String::new()
+            }];
+            row.extend(
+                cells
+                    .iter()
+                    .map(|c| c.get(line).cloned().unwrap_or_default()),
+            );
+            rows.push(row);
+        }
+    }
+    let headers = [&format!("{prefix}Language")[..], "Files"]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    let grid = Grid::left(headers, &rows);
+    let mut out = vec![
+        style(DIM, grid.rule()),
+        style(BOLD, grid.line(&grid.headers).trim_end().to_string()),
+        style(DIM, grid.rule()),
+    ];
+    for (i, cells) in rows.iter().enumerate() {
+        let line = grid.line(cells).trim_end().to_string();
+        let lang = first_row.iter().position(|&f| f == i).map(|k| langs[k]);
+        out.push(match lang {
+            Some(lang) if styled => format!("{}●{RESET} {}", fg(lang.color), &line[2..]),
+            _ => line,
+        });
+    }
+    out.join("\n") + "\n"
+}
+
+const WRAP: usize = 40; // widest a --languages column grows before its items continue on the next line
+
+// Joins items with single spaces into lines no longer than WRAP, breaking only between items.
+fn wrap(items: &[&str]) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for item in items {
+        match lines.last_mut() {
+            Some(last) if last.len() + 1 + item.len() <= WRAP => {
+                last.push(' ');
+                last.push_str(item);
+            }
+            _ => lines.push((*item).to_string()),
+        }
+    }
+    lines
+}
+
 // JSON.stringify's string escaping: quote, backslash, and control bytes; everything else as is.
 fn json_str(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
@@ -415,13 +492,21 @@ fn bg(color: [u8; 3]) -> String {
     format!("\x1b[48;2;{};{};{}m", color[0], color[1], color[2])
 }
 
-// A grid lays out rows under a header: first column left-aligned, the rest right-aligned and at least MIN_WIDTH wide, four-space gutters, a rule as wide as the header. Widths are in characters.
+// A grid lays out rows under a header: first column left-aligned, the rest right-aligned (or all left-aligned) and at least MIN_WIDTH wide, four-space gutters, a rule as wide as the header. Widths are in characters.
 struct Grid {
     headers: Vec<String>,
     widths: Vec<usize>,
+    left: bool, // every column left-aligned
 }
 
 impl Grid {
+    fn left(headers: Vec<String>, rows: &[Vec<String>]) -> Grid {
+        Grid {
+            left: true,
+            ..Grid::new(headers, rows)
+        }
+    }
+
     fn new(headers: Vec<String>, rows: &[Vec<String>]) -> Grid {
         let widths = headers
             .iter()
@@ -435,7 +520,11 @@ impl Grid {
                     .fold(width, |width, row| width.max(row[col].chars().count()))
             })
             .collect();
-        Grid { headers, widths }
+        Grid {
+            headers,
+            widths,
+            left: false,
+        }
     }
 
     fn line(&self, row: &[String]) -> String {
@@ -445,7 +534,7 @@ impl Grid {
                 out.push_str(GAP);
             }
             let pad = " ".repeat(self.widths[col] - cell.chars().count());
-            if col == 0 {
+            if col == 0 || self.left {
                 out.push_str(cell);
                 out.push_str(&pad);
             } else {

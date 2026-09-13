@@ -29,6 +29,7 @@ const HELP: &str = concat!(
 Count lines of code per language under each PATH (default: the current directory).
 
   --json               print the report as JSON
+  --languages          list the languages and the files each one claims
   --no-color           plain output even on a terminal
   --no-ignore          count files that .gitignore excludes
   --exclude PATTERN    skip what this .gitignore line would, under every PATH; repeatable
@@ -48,6 +49,7 @@ struct Options {
 
 enum Exit {
     Help,
+    Languages { no_color: bool },
     Usage(String), // the message to print before the usage line; empty means the usage line alone
 }
 
@@ -69,6 +71,15 @@ fn parse(args: &[OsString]) -> Result<Options, Exit> {
         .any(|a| a == "-h" || a == "--help")
     {
         return Err(Exit::Help);
+    }
+    if args
+        .iter()
+        .take_while(|a| *a != "--")
+        .any(|a| a == "--languages")
+    {
+        return Err(Exit::Languages {
+            no_color: args.iter().any(|a| a == "--no-color"),
+        });
     }
     while i < args.len() {
         let arg = args[i].to_string_lossy();
@@ -130,6 +141,10 @@ fn run(args: &[OsString]) -> i32 {
         Ok(opts) => opts,
         Err(Exit::Help) => {
             print!("{HELP}");
+            return 0;
+        }
+        Err(Exit::Languages { no_color }) => {
+            print!("{}", report::languages(!no_color && terminal()));
             return 0;
         }
         Err(Exit::Usage(message)) => {

@@ -440,18 +440,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         Lang {
             name: "Shell",
             extensions: &[".sh", ".bash", ".zsh", ".ksh"],
-            names: &[
-                ".bashrc",
-                ".bash_profile",
-                ".bash_aliases",
-                ".bash_logout",
-                ".profile",
-                ".zshrc",
-                ".zshenv",
-                ".zprofile",
-                ".zlogin",
-                ".zlogout",
-            ],
+            names: &[".bashrc", ".bash_profile", ".profile", ".zshrc"],
             shebangs: &["sh", "bash", "zsh", "ksh", "dash"],
             line: &[b"#"],
             strings: vec![

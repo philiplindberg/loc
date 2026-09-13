@@ -27,7 +27,7 @@ Counts lines of code across a directory tree in 33 languages. Honors `.gitignore
 | Sass | `.sass` |
 | Scala | `.scala` `.sc` `.sbt` |
 | SCSS | `.scss` |
-| Shell | `.sh` `.bash` `.zsh` `.ksh`, `.bashrc` and other rc files, `#!` `sh` `bash` `zsh` `ksh` `dash` |
+| Shell | `.sh` `.bash` `.zsh` `.ksh`, `.bashrc` `.bash_profile` `.profile` `.zshrc`, `#!` `sh` `bash` `zsh` `ksh` `dash` |
 | SQL | `.sql` |
 | Svelte | `.svelte` |
 | Swift | `.swift` |

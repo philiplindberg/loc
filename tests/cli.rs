@@ -293,3 +293,49 @@ fn exclude_without_a_pattern_is_a_usage_error() {
     assert_eq!(code(&run(&["--exclude=", "."], &s.0)), 1);
     assert_eq!(code(&run(&["--exclude=vendor", "."], &s.0)), 0);
 }
+
+#[test]
+fn languages_lists_the_table() {
+    let s = Scratch::new();
+    let out = run(&["--json", "--languages", "nope"], &s.0);
+    assert_eq!(code(&out), 0);
+    let text = stdout(&out);
+    let lines: Vec<&str> = text.lines().collect();
+    let cells = |line: &str| -> Vec<String> {
+        line.split("  ")
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    assert_eq!(cells(lines[1]), ["Language", "Files"]);
+    let body = &lines[3..];
+    let firsts: Vec<&str> = body
+        .iter()
+        .copied()
+        .filter(|l| !l.starts_with(' '))
+        .collect();
+    let readme = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md")).unwrap();
+    assert!(
+        readme.contains(&format!("in {} languages.", firsts.len())),
+        "{} rows",
+        firsts.len()
+    );
+    let names: Vec<&str> = firsts
+        .iter()
+        .map(|r| r.split_whitespace().next().unwrap())
+        .collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted);
+    let ruby = firsts
+        .iter()
+        .find(|r| r.starts_with("Ruby "))
+        .expect("Ruby row");
+    assert_eq!(cells(ruby), ["Ruby", ".rb .rake .gemspec Gemfile Rakefile"]);
+    assert!(
+        lines.iter().all(|l| !l.ends_with(' ')),
+        "no trailing spaces"
+    );
+    assert!(!text.contains("PHP code"));
+}
