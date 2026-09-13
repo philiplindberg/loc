@@ -46,11 +46,12 @@ fn compile_pattern(mut line: &[u8]) -> Option<Pattern> {
         negate,
         dir_only,
         anchored,
-        steps: compile_glob(line),
+        steps: compile_glob(line)?,
     })
 }
 
-fn compile_glob(glob: &[u8]) -> Vec<Step> {
+// None when a [ has no closing ]: git's matcher gives up on such a line, so it matches nothing.
+fn compile_glob(glob: &[u8]) -> Option<Vec<Step>> {
     let mut steps = Vec::new();
     let mut i = 0;
     if glob.starts_with(b"**/") {
@@ -80,19 +81,15 @@ fn compile_glob(glob: &[u8]) -> Vec<Step> {
             steps.push(Step::Byte(glob[i + 1]));
             i += 2;
         } else if c == b'[' {
-            if let Some((step, n)) = compile_class(&glob[i..]) {
-                steps.push(step);
-                i += n;
-            } else {
-                steps.push(Step::Byte(b'['));
-                i += 1;
-            }
+            let (step, n) = compile_class(&glob[i..])?;
+            steps.push(step);
+            i += n;
         } else {
             steps.push(Step::Byte(c));
             i += 1;
         }
     }
-    steps
+    Some(steps)
 }
 
 // Reads a bracket set starting at glob[0] == '[' and returns it with the number of bytes consumed.

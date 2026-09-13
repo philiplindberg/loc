@@ -14,3 +14,8 @@ file?.py
 \#hash.json
 spaced.js   
 *.log
+[a-c]x.rs
+[!m]y.rs
+[a\-b]w.rs
+[v.rs
+q**.rs

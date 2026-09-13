@@ -110,12 +110,14 @@ fn unreadable_file_inside_a_walk_is_skipped_and_exits_0() {
     s.file("ok.rs", "x\n");
     let locked = s.file("locked.rs", "y\n");
     Scratch::unreadable(&locked);
+    let unknown = s.file("locked.xyz", "z\n");
+    Scratch::unreadable(&unknown);
     let out = run(&["--json", "."], &s.0);
     assert_eq!(code(&out), 0);
     let json = stdout(&out);
     assert!(json.contains("\"name\":\"Rust\",\"files\":1,"), "{json}");
     assert!(
-        json.contains("\"label\":\"unreadable\",\"files\":1,"),
+        json.contains("\"label\":\"unreadable\",\"files\":2,"),
         "{json}"
     );
 }
@@ -338,4 +340,113 @@ fn languages_lists_the_table() {
         "no trailing spaces"
     );
     assert!(!text.contains("PHP code"));
+}
+
+#[test]
+fn a_dot_git_entry_is_never_entered_or_counted() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    s.file(".git/x.rs", "y\n");
+    s.file("sub/.git", "z\n");
+    s.file("sub/b.rs", "w\n");
+    for args in [&["--json", "."][..], &["--json", "--no-ignore", "."][..]] {
+        let json = stdout(&run(args, &s.0));
+        assert_eq!(files_of(&json, "Rust"), 2, "{json}");
+        assert!(
+            json.contains("\"skipped\":{\"text\":{\"files\":0,"),
+            "{json}"
+        );
+    }
+}
+
+#[test]
+fn ignore_files_above_path_apply_up_to_the_nearest_dot_git() {
+    let s = Scratch::new();
+    fs::create_dir(s.0.join(".git")).unwrap();
+    s.file(".gitignore", "*.md\n");
+    s.file("mid/.gitignore", "*.zig\n");
+    s.file("mid/sub/a.md", "x\n");
+    s.file("mid/sub/a.zig", "x\n");
+    s.file("mid/sub/a.rs", "x\n");
+    let json = stdout(&run(&["--json", "mid/sub"], &s.0));
+    assert_eq!(files_of(&json, "Rust"), 1, "{json}");
+    assert_eq!(files_of(&json, "Markdown"), 0, "{json}");
+    assert_eq!(files_of(&json, "Zig"), 0, "{json}");
+    let json = stdout(&run(&["--json", "--no-ignore", "mid/sub"], &s.0));
+    assert_eq!(files_of(&json, "Markdown"), 1, "{json}");
+    assert_eq!(files_of(&json, "Zig"), 1, "{json}");
+}
+
+#[test]
+fn an_escaped_trailing_space_matches_a_name_ending_in_a_space() {
+    let s = Scratch::new();
+    s.file(".gitignore", "sp.rs\\ \n");
+    s.file("sp.rs ", "x\n");
+    s.file("sp.rs", "y\n");
+    let json = stdout(&run(&["--json", "."], &s.0));
+    assert_eq!(files_of(&json, "Rust"), 1, "{json}");
+    assert!(
+        json.contains("\"skipped\":{\"text\":{\"files\":1,"),
+        "{json}"
+    );
+}
+
+#[test]
+fn more_than_ten_labels_fold_and_one_binary_file_is_singular() {
+    let s = Scratch::new();
+    for i in 1..=12 {
+        s.file(&format!("f{i}.ext{i}"), "x\n");
+    }
+    fs::write(s.0.join("blob.bin"), b"\0\0").unwrap();
+    let text = stdout(&run(&["."], &s.0));
+    assert!(text.contains("2 more labels"), "{text}");
+    assert!(text.contains("\n1 binary file, 2 B: .bin 1\n"), "{text}");
+}
+
+#[test]
+fn an_unreadable_directory_inside_a_walk_is_skipped_with_a_warning() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    s.file("locked/b.rs", "y\n");
+    Scratch::unreadable(&s.0.join("locked"));
+    let out = run(&["--json", "."], &s.0);
+    assert_eq!(code(&out), 0);
+    assert_eq!(files_of(&stdout(&out), "Rust"), 1);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot read"));
+}
+
+#[test]
+fn no_color_and_jobs_do_not_change_output_and_path_defaults_to_dot() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    assert_eq!(
+        stdout(&run(&["."], &s.0)),
+        stdout(&run(&["--no-color", "."], &s.0))
+    );
+    assert_eq!(files_of(&stdout(&run(&["--json"], &s.0)), "Rust"), 1);
+    let cases = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/cases");
+    let default = run(&["--json", cases.to_str().unwrap()], &s.0);
+    let serial = run(&["--json", "--jobs", "1", cases.to_str().unwrap()], &s.0);
+    assert_eq!(default.stdout, serial.stdout);
+}
+
+#[test]
+fn a_path_with_dot_dot_components_is_counted() {
+    let s = Scratch::new();
+    fs::create_dir(s.0.join(".git")).unwrap();
+    s.file("sub/a.rs", "x\n");
+    let out = run(&["--json", "sub/../sub"], &s.0);
+    assert_eq!(code(&out), 0);
+    assert_eq!(files_of(&stdout(&out), "Rust"), 1);
+}
+
+#[test]
+fn json_escapes_a_label_and_the_table_separates_thousands() {
+    let s = Scratch::new();
+    s.file("na\"me\\x", "x\n");
+    let json = stdout(&run(&["--json", "."], &s.0));
+    assert!(json.contains("\"label\":\"na\\\"me\\\\x\","), "{json}");
+    s.file("big.rs", &"x\n".repeat(1234));
+    let text = stdout(&run(&["."], &s.0));
+    assert!(text.contains("1,234"), "{text}");
 }

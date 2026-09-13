@@ -27,6 +27,22 @@ fn check(flags: &[&str], expected: &str) {
 }
 
 #[test]
+fn table_matches_expected() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let out = Command::new(env!("CARGO_BIN_EXE_loc"))
+        .arg(root.join("fixtures/cases"))
+        .output()
+        .expect("run loc");
+    assert!(out.status.success());
+    let want = fs::read_to_string(root.join("fixtures/expected.txt")).expect("read expected.txt");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        want,
+        "loc fixtures/cases differs from fixtures/expected.txt"
+    );
+}
+
+#[test]
 fn json_matches_expected() {
     check(&["--json"], "expected.json");
 }
