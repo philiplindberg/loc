@@ -1,9 +1,10 @@
 // The report and its two renderings, SPEC.md Output. The JSON is the conformance format; the table is for people.
 
+use std::collections::HashMap;
 use std::fmt::Write;
 
 use crate::lang::LANGS;
-use crate::walk::Sums;
+use crate::walk::{Skipped, Sums};
 
 pub struct LangRow {
     name: &'static str,
@@ -12,6 +13,7 @@ pub struct LangRow {
     blank: usize,
     comment: usize,
     code: usize,
+    bytes: u64,
     color: [u8; 3],
 }
 
@@ -22,28 +24,57 @@ pub struct Totals {
     blank: usize,
     comment: usize,
     code: usize,
+    bytes: u64,
 }
 
 pub struct SkippedLabel {
     label: String,
     files: usize,
+    bytes: u64,
+}
+
+// Skipped files of one kind, text or binary: labels in report order and their sum.
+#[derive(Default)]
+pub struct SkippedGroup {
+    labels: Vec<SkippedLabel>,
+    files: usize,
+    bytes: u64,
+}
+
+impl SkippedGroup {
+    fn new(labels: HashMap<String, Skipped>) -> SkippedGroup {
+        let mut group = SkippedGroup::default();
+        for (label, skipped) in labels {
+            group.labels.push(SkippedLabel {
+                label,
+                files: skipped.files,
+                bytes: skipped.bytes,
+            });
+            group.files += skipped.files;
+            group.bytes += skipped.bytes;
+        }
+        group
+            .labels
+            .sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.label.cmp(&b.label)));
+        group
+    }
 }
 
 pub struct Report {
     languages: Vec<LangRow>,
     total: Totals,
-    skipped_files: usize,
-    skipped: Vec<SkippedLabel>,
+    text: SkippedGroup,
+    binary: SkippedGroup,
 }
 
 impl Report {
-    // Orders the sums as the spec requires: languages by code descending then name, labels by files descending then label, both byte-wise.
+    // Orders the sums as the spec requires: languages by code descending then name, labels by size descending then label, both byte-wise.
     pub fn new(sums: Sums) -> Report {
         let mut report = Report {
             languages: Vec::new(),
             total: Totals::default(),
-            skipped_files: 0,
-            skipped: Vec::new(),
+            text: SkippedGroup::default(),
+            binary: SkippedGroup::default(),
         };
         for (i, lang) in LANGS.iter().enumerate() {
             if sums.files[i] == 0 {
@@ -57,6 +88,7 @@ impl Report {
                 blank: counts.blank,
                 comment: counts.comment,
                 code: counts.code,
+                bytes: sums.bytes[i],
                 color: lang.color,
             });
             report.total.files += sums.files[i];
@@ -64,17 +96,13 @@ impl Report {
             report.total.blank += counts.blank;
             report.total.comment += counts.comment;
             report.total.code += counts.code;
+            report.total.bytes += sums.bytes[i];
         }
         report
             .languages
             .sort_by(|a, b| b.code.cmp(&a.code).then_with(|| a.name.cmp(b.name)));
-        for (label, files) in sums.skipped {
-            report.skipped.push(SkippedLabel { label, files });
-            report.skipped_files += files;
-        }
-        report
-            .skipped
-            .sort_by(|a, b| b.files.cmp(&a.files).then_with(|| a.label.cmp(&b.label)));
+        report.text = SkippedGroup::new(sums.text);
+        report.binary = SkippedGroup::new(sums.binary);
         report
     }
 
@@ -87,33 +115,49 @@ impl Report {
             }
             let _ = write!(
                 out,
-                "{{\"name\":{},\"files\":{},\"lines\":{},\"blank\":{},\"comment\":{},\"code\":{}}}",
+                "{{\"name\":{},\"files\":{},\"lines\":{},\"blank\":{},\"comment\":{},\"code\":{},\"bytes\":{}}}",
                 json_str(row.name),
                 row.files,
                 row.lines,
                 row.blank,
                 row.comment,
-                row.code
+                row.code,
+                row.bytes
             );
         }
         let total = self.total;
         let _ = write!(
             out,
-            "],\"total\":{{\"files\":{},\"lines\":{},\"blank\":{},\"comment\":{},\"code\":{}}},\"skipped\":{{\"files\":{},\"labels\":[",
-            total.files, total.lines, total.blank, total.comment, total.code, self.skipped_files
+            "],\"total\":{{\"files\":{},\"lines\":{},\"blank\":{},\"comment\":{},\"code\":{},\"bytes\":{}}},\"skipped\":{{",
+            total.files, total.lines, total.blank, total.comment, total.code, total.bytes
         );
-        for (i, row) in self.skipped.iter().enumerate() {
+        for (i, (key, group)) in [("text", &self.text), ("binary", &self.binary)]
+            .into_iter()
+            .enumerate()
+        {
             if i > 0 {
                 out.push(',');
             }
             let _ = write!(
                 out,
-                "{{\"label\":{},\"files\":{}}}",
-                json_str(&row.label),
-                row.files
+                "\"{key}\":{{\"files\":{},\"bytes\":{},\"labels\":[",
+                group.files, group.bytes
             );
+            for (i, row) in group.labels.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                let _ = write!(
+                    out,
+                    "{{\"label\":{},\"files\":{},\"bytes\":{}}}",
+                    json_str(&row.label),
+                    row.files,
+                    row.bytes
+                );
+            }
+            out.push_str("]}");
         }
-        out.push_str("]}}\n");
+        out.push_str("}}\n");
         out
     }
 
@@ -159,7 +203,7 @@ impl Report {
                 with_commas(totals.blank),
                 with_commas(totals.comment),
                 with_commas(totals.code),
-                share(totals.code, self.total.code),
+                share(totals.code as u64, self.total.code as u64),
             ]
         };
         let body: Vec<Vec<String>> = self
@@ -174,6 +218,7 @@ impl Report {
                         blank: lang.blank,
                         comment: lang.comment,
                         code: lang.code,
+                        bytes: lang.bytes,
                     },
                 )
             })
@@ -215,38 +260,45 @@ impl Report {
         out.push(style(DIM, grid.rule()));
         out.push(String::new());
 
-        let all = self.total.files + self.skipped_files;
+        let all_files = self.total.files + self.text.files;
+        let all_bytes = self.total.bytes + self.text.bytes;
         out.push(style(
             DIM,
             format!(
-                "{} of {} files skipped ({}%)",
-                with_commas(self.skipped_files),
-                with_commas(all),
-                share(self.skipped_files, all)
+                "{} of {} files skipped, {} of {} of text ({}%)",
+                with_commas(self.text.files),
+                with_commas(all_files),
+                size(self.text.bytes),
+                size(all_bytes),
+                share(self.text.bytes, all_bytes)
             ),
         ));
-        if !self.skipped.is_empty() {
-            let shown = self.skipped.len().min(10);
-            let mut rows: Vec<Vec<String>> = self.skipped[..shown]
+        let labels = &self.text.labels;
+        if !labels.is_empty() {
+            let shown = labels.len().min(10);
+            let mut rows: Vec<Vec<String>> = labels[..shown]
                 .iter()
                 .map(|skipped| {
                     vec![
                         skipped.label.clone(),
                         with_commas(skipped.files),
-                        share(skipped.files, all),
+                        size(skipped.bytes),
+                        share(skipped.bytes, all_bytes),
                     ]
                 })
                 .collect();
-            if self.skipped.len() > 10 {
-                let rest: usize = self.skipped[10..].iter().map(|skipped| skipped.files).sum();
+            if labels.len() > 10 {
+                let rest_files: usize = labels[10..].iter().map(|skipped| skipped.files).sum();
+                let rest_bytes: u64 = labels[10..].iter().map(|skipped| skipped.bytes).sum();
                 rows.push(vec![
-                    format!("{} more labels", with_commas(self.skipped.len() - 10)),
-                    with_commas(rest),
-                    share(rest, all),
+                    format!("{} more labels", with_commas(labels.len() - 10)),
+                    with_commas(rest_files),
+                    size(rest_bytes),
+                    share(rest_bytes, all_bytes),
                 ]);
             }
             let skipped_grid = Grid::new(
-                ["Skipped", "Files", "%"]
+                ["Skipped", "Files", "Size", "%"]
                     .iter()
                     .map(ToString::to_string)
                     .collect(),
@@ -259,6 +311,25 @@ impl Report {
                 out.push(style(DIM, skipped_grid.line(cells)));
             }
             out.push(style(DIM, skipped_grid.rule()));
+        }
+        if self.binary.files > 0 {
+            let labels = &self.binary.labels;
+            let mut line = format!(
+                "{} binary file{}, {}: ",
+                with_commas(self.binary.files),
+                if self.binary.files == 1 { "" } else { "s" },
+                size(self.binary.bytes)
+            );
+            let shown = labels.len().min(10);
+            let listed: Vec<String> = labels[..shown]
+                .iter()
+                .map(|skipped| format!("{} {}", skipped.label, with_commas(skipped.files)))
+                .collect();
+            line.push_str(&listed.join(", "));
+            if labels.len() > 10 {
+                let _ = write!(line, ", {} more", with_commas(labels.len() - 10));
+            }
+            out.push(style(DIM, line));
         }
         out.join("\n") + "\n"
     }
@@ -287,6 +358,28 @@ fn json_str(text: &str) -> String {
     out
 }
 
+// Bytes to one decimal in the smallest unit from KB up that keeps the tenths below 10,000, or TB; under 1000 bytes whole.
+fn size(bytes: u64) -> String {
+    if bytes < 1000 {
+        return format!("{bytes} B");
+    }
+    const UNITS: [(u64, &str); 4] = [
+        (1_000, "KB"),
+        (1_000_000, "MB"),
+        (1_000_000_000, "GB"),
+        (1_000_000_000_000, "TB"),
+    ];
+    let bytes = u128::from(bytes); // bytes × 10 must not overflow
+    for (i, &(unit, name)) in UNITS.iter().enumerate() {
+        let unit = u128::from(unit);
+        let tenths = (bytes * 10 + unit / 2) / unit;
+        if tenths < 10_000 || i == UNITS.len() - 1 {
+            return format!("{}.{} {name}", tenths / 10, tenths % 10);
+        }
+    }
+    unreachable!("the last unit always returns")
+}
+
 fn with_commas(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
@@ -300,7 +393,7 @@ fn with_commas(n: usize) -> String {
 }
 
 // part/total to one decimal in integer arithmetic, so every implementation rounds alike.
-fn share(part: usize, total: usize) -> String {
+fn share(part: u64, total: u64) -> String {
     if total == 0 {
         return "0.0".to_string();
     }
@@ -369,5 +462,31 @@ impl Grid {
 
     fn rule(&self) -> String {
         "─".repeat(self.width())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::size;
+
+    // The size rule from SPEC.md at its unit boundaries and rounding edges.
+    #[test]
+    fn sizes_follow_the_spec_rule() {
+        assert_eq!(size(0), "0 B");
+        assert_eq!(size(1), "1 B");
+        assert_eq!(size(999), "999 B");
+        assert_eq!(size(1000), "1.0 KB");
+        assert_eq!(size(1049), "1.0 KB");
+        assert_eq!(size(1050), "1.1 KB");
+        assert_eq!(size(9999), "10.0 KB");
+        assert_eq!(size(999949), "999.9 KB");
+        assert_eq!(size(999950), "1.0 MB");
+        assert_eq!(size(1000000), "1.0 MB");
+        assert_eq!(size(1234567), "1.2 MB");
+        assert_eq!(size(999950000), "1.0 GB");
+        assert_eq!(size(1000000000), "1.0 GB");
+        assert_eq!(size(1000000000000), "1.0 TB");
+        assert_eq!(size(1230000000000000), "1230.0 TB");
+        assert_eq!(size(18446744073709551615), "18446744.1 TB");
     }
 }

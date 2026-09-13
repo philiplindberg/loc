@@ -13,11 +13,19 @@ use crate::ignore::{IgnoreFile, ancestors, ignored, offset_below, read_ignore};
 use crate::lang::{LANGS, by_ext};
 use crate::scan::{Counts, scan};
 
-// Sums kept by one worker: per-language totals by language index, and skipped files by label.
+// Sums kept by one worker: per-language totals by language index, and skipped files by label, text and binary apart.
 pub struct Sums {
     pub langs: Vec<Counts>,
     pub files: Vec<usize>,
-    pub skipped: HashMap<String, usize>,
+    pub bytes: Vec<u64>,
+    pub text: HashMap<String, Skipped>,
+    pub binary: HashMap<String, Skipped>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct Skipped {
+    pub files: usize,
+    pub bytes: u64,
 }
 
 impl Sums {
@@ -25,44 +33,78 @@ impl Sums {
         Sums {
             langs: vec![Counts::default(); LANGS.len()],
             files: vec![0; LANGS.len()],
-            skipped: HashMap::new(),
+            bytes: vec![0; LANGS.len()],
+            text: HashMap::new(),
+            binary: HashMap::new(),
         }
     }
 
     fn add(&mut self, other: &Sums) {
         for i in 0..LANGS.len() {
             self.files[i] += other.files[i];
+            self.bytes[i] += other.bytes[i];
             self.langs[i] += other.langs[i];
         }
-        for (label, files) in &other.skipped {
-            *self.skipped.entry(label.clone()).or_insert(0) += files;
+        for (label, skipped) in &other.text {
+            add(&mut self.text, label.clone(), skipped.files, skipped.bytes);
+        }
+        for (label, skipped) in &other.binary {
+            add(
+                &mut self.binary,
+                label.clone(),
+                skipped.files,
+                skipped.bytes,
+            );
         }
     }
 
     fn count(&mut self, path: &Path, reader: &mut Reader) {
         let name = path.file_name().map_or(&b""[..], |n| n.as_bytes());
         let Some(li) = extension(name).and_then(by_ext) else {
-            *self.skipped.entry(extension_label(name)).or_insert(0) += 1;
+            match reader.head(path) {
+                Ok((head, size)) => {
+                    let group = if head.contains(&0) {
+                        &mut self.binary
+                    } else {
+                        &mut self.text
+                    };
+                    add(group, label(name), 1, size);
+                }
+                Err(err) => self.unreadable(path, &err),
+            }
             return;
         };
         let buf = match reader.read(path) {
             Ok(buf) => buf,
-            Err(err) => {
-                eprintln!("loc: cannot read {}: {}", path.display(), err);
-                *self.skipped.entry("unreadable".to_string()).or_insert(0) += 1;
-                return;
-            }
+            Err(err) => return self.unreadable(path, &err),
         };
         if buf[..buf.len().min(NUL_WINDOW)].contains(&0) {
-            *self.skipped.entry("binary".to_string()).or_insert(0) += 1;
+            add(&mut self.binary, label(name), 1, buf.len() as u64);
             return;
         }
         self.files[li] += 1;
+        self.bytes[li] += buf.len() as u64;
         self.langs[li] += scan(buf, &LANGS[li]);
+    }
+
+    fn unreadable(&mut self, path: &Path, err: &io::Error) {
+        eprintln!("loc: cannot read {}: {}", path.display(), err);
+        add(
+            &mut self.text,
+            "unreadable".to_string(),
+            1,
+            size_on_disk(path),
+        );
     }
 }
 
-const NUL_WINDOW: usize = 8192; // a recognized file is binary if a NUL byte appears this early
+const NUL_WINDOW: usize = 8192; // a file is binary if a NUL byte appears this early
+
+fn add(group: &mut HashMap<String, Skipped>, label: String, files: usize, bytes: u64) {
+    let entry = group.entry(label).or_default();
+    entry.files += files;
+    entry.bytes += bytes;
+}
 
 fn walk(root: &Path, no_ignore: bool, emit: &mut impl FnMut(PathBuf)) {
     if !fs::metadata(root).is_ok_and(|st| st.is_dir()) {
@@ -167,6 +209,16 @@ impl Reader<'_> {
         f.take(size).read_to_end(&mut self.buf)?;
         Ok(&self.buf)
     }
+
+    // The first NUL_WINDOW bytes, enough for the binary check, and the file's size.
+    fn head(&mut self, path: &Path) -> io::Result<(&[u8], u64)> {
+        let _turn = self.turns.acquire();
+        let f = File::open(path)?;
+        let size = f.metadata()?.len();
+        self.buf.clear();
+        f.take(NUL_WINDOW as u64).read_to_end(&mut self.buf)?;
+        Ok((&self.buf, size))
+    }
 }
 
 // The bytes from the last '.' in a name, when that dot is not the first byte.
@@ -177,11 +229,17 @@ fn extension(name: &[u8]) -> Option<&[u8]> {
         .map(|dot| &name[dot..])
 }
 
-fn extension_label(name: &[u8]) -> String {
+// The skipped label of an unrecognized file: its lower-cased extension, or its name when it has none.
+fn label(name: &[u8]) -> String {
     match extension(name) {
         Some(ext) => String::from_utf8_lossy(ext).to_lowercase(),
-        None => "(none)".to_string(),
+        None => String::from_utf8_lossy(name).into_owned(),
     }
+}
+
+// The size a file without opening it; 0 when even that fails.
+fn size_on_disk(path: &Path) -> u64 {
+    fs::symlink_metadata(path).map_or(0, |m| m.len())
 }
 
 pub fn count_tree(root: &Path, no_ignore: bool, jobs: usize) -> Sums {
