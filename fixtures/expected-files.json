@@ -19,6 +19,7 @@
 {"path":"edge/bom.rs","language":"Rust","lines":1,"blank":0,"comment":1,"code":0},
 {"path":"edge/crlf.go","language":"Go","lines":2,"blank":0,"comment":1,"code":1},
 {"path":"edge/empty.zig","language":"Zig","lines":0,"blank":0,"comment":0,"code":0},
+{"path":"edge/fake.png","skipped":"binary","label":".png"},
 {"path":"edge/no-trailing-newline.go","language":"Go","lines":1,"blank":0,"comment":0,"code":1},
 {"path":"edge/sub/nested.go","language":"Go","lines":1,"blank":0,"comment":0,"code":1},
 {"path":"edge/unknown-shebang","skipped":"text","label":"unknown-shebang"},

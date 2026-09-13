@@ -623,6 +623,32 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
 
 const EXT_MAX: usize = 16; // an extension longer than this is never recognized
 
+// Extensions that are never text and common enough to be numerous in an ordinary tree: a file with one is binary by its name alone, so it is never opened. Anything rarer is left to the NUL check, which is exact.
+pub const BINARY_EXTENSIONS: &[&str] = &[
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".ttf", ".otf", ".woff", ".woff2", ".zip",
+    ".gz", ".tgz", ".bz2", ".xz", ".zst", ".7z", ".jar", ".mp3", ".mp4", ".mov", ".wav", ".webm",
+    ".pyc", ".o", ".a", ".so", ".dylib", ".dll", ".exe", ".class", ".wasm", ".rlib", ".rmeta",
+    ".pdf",
+];
+
+static BINARY_EXT: LazyLock<HashMap<&'static [u8], ()>> = LazyLock::new(|| {
+    BINARY_EXTENSIONS
+        .iter()
+        .map(|ext| (ext.as_bytes(), ()))
+        .collect()
+});
+
+// Whether an extension, dot included, compared without regard to ASCII case, names a binary file by convention.
+pub fn binary_ext(ext: &[u8]) -> bool {
+    let mut lower = [0; EXT_MAX];
+    let Some(lower) = lower.get_mut(..ext.len()) else {
+        return false;
+    };
+    lower.copy_from_slice(ext);
+    lower.make_ascii_lowercase();
+    BINARY_EXT.contains_key(&*lower)
+}
+
 static BY_EXT: LazyLock<HashMap<&'static [u8], usize>> = LazyLock::new(|| {
     LANGS
         .iter()

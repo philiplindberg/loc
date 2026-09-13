@@ -96,7 +96,7 @@ The table is the output of `loc --languages`. A file is recognized by extension,
 
 ## Rules and tests
 
-`SPEC.md` defines every rule and the exact output; the program must agree with it byte for byte, and cloc, tokei, and scc are not the reference. `fixtures/cases/` holds a small file per rule, and four expected documents pin the program's output on it: `fixtures/expected.json`, `fixtures/expected-no-ignore.json`, `fixtures/expected.txt`, and `fixtures/expected-files.json`, the last with every fixture's own counts so a failure names the file. `tests/cli.rs` pins what fixtures cannot: exit codes, several paths, `--exclude`, and the ignore rules that git cannot store. `cargo test` runs all of it.
+`SPEC.md` defines every rule and the exact output; the program must agree with it byte for byte. `fixtures/cases/` holds a small file per rule, and four expected documents pin the program's output on it: `fixtures/expected.json`, `fixtures/expected-no-ignore.json`, `fixtures/expected.txt`, and `fixtures/expected-files.json`, the last with every fixture's own counts so a failure names the file. `tests/cli.rs` pins what fixtures cannot: exit codes, several paths, `--exclude`, and the ignore rules that git cannot store. `cargo test` runs all of it.
 
 The expected documents are the authority: a disagreement is a bug in the program until an expected document is changed on purpose. To add a language: a row in the spec's language table, an entry in `src/lang.rs`, a fixture per rule, the fixture's counts predicted by hand before running the program, then the expected documents regenerated.
 

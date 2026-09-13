@@ -10,7 +10,7 @@ use std::sync::{Condvar, Mutex};
 use std::thread;
 
 use crate::ignore::{IgnoreFile, ancestors, exclude_file, ignored, offset_below, read_ignore};
-use crate::lang::{LANGS, by_ext, by_name, by_shebang};
+use crate::lang::{LANGS, binary_ext, by_ext, by_name, by_shebang};
 use crate::scan::{Counts, scan};
 
 // Sums kept by one worker: per-language totals by language index, and skipped files by label, text and binary apart.
@@ -62,6 +62,13 @@ impl Sums {
         let name = path.file_name().map_or(&b""[..], |n| n.as_bytes());
         let ext = extension(name);
         let mut li = ext.and_then(by_ext).or_else(|| by_name(name));
+        if li.is_none()
+            && let Some(ext) = ext
+            && binary_ext(ext)
+        {
+            add(&mut self.binary, label(name), 1, size_on_disk(path));
+            return;
+        }
         if li.is_none() {
             // Unrecognized so far: the head decides between binary, a shebang naming a language (extensionless files only), and skipped text.
             match reader.head(path) {
