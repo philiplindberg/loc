@@ -10,7 +10,7 @@ use report::Report;
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, ErrorKind, IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::exit;
 
 macro_rules! usage {
@@ -123,8 +123,8 @@ fn run(args: &[OsString]) -> i32 {
             return 1;
         }
     };
-    if std::fs::symlink_metadata(&opts.root).is_err() {
-        eprintln!("loc: {}: no such file or directory", opts.root.display());
+    if let Err(err) = readable(&opts.root) {
+        eprintln!("loc: {}: {err}", opts.root.display());
         return 2;
     }
 
@@ -145,6 +145,15 @@ fn run(args: &[OsString]) -> i32 {
             eprintln!("loc: {err}");
             1
         }
+    }
+}
+
+// Opens PATH the way the walk will, so a PATH that cannot be read fails here with exit code 2 instead of as a skipped file inside the walk. A symbolic link is followed: PATH names its target.
+fn readable(path: &Path) -> io::Result<()> {
+    if std::fs::metadata(path)?.is_dir() {
+        std::fs::read_dir(path).map(drop)
+    } else {
+        std::fs::File::open(path).map(drop)
     }
 }
 
