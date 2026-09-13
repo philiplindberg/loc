@@ -1,6 +1,6 @@
 # loc
 
-Counts lines of code per language across a directory tree. Honors `.gitignore`, skips binaries and symlinks, prints a table on a terminal or JSON with `--json`. The rules are in `SPEC.md`; `fixtures/` pins them.
+Counts lines of code across a directory tree in 33 languages. Honors `.gitignore`, skips binaries and symlinks, prints a table on a terminal or JSON with `--json`. The rules are in `SPEC.md`; `fixtures/` pins them.
 
 | Language | Files |
 |---|---|

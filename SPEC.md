@@ -188,7 +188,7 @@ A `.h` file is C, as GitHub linguist classifies it, whatever language its neighb
 
 ## Non-goals
 
-git's index, `.git/info/exclude`, global excludes, `.ignore` and tool-specific ignore files, submodules, encoding detection beyond the `NUL` check, per-file output, COCOMO estimates, complexity metrics, languages beyond the thirty-three above.
+git's index, `.git/info/exclude`, global excludes, `.ignore` and tool-specific ignore files, submodules, encoding detection beyond the `NUL` check, per-file output, COCOMO estimates, complexity metrics, languages beyond the table above.
 
 ## Conformance
 

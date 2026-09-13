@@ -717,3 +717,26 @@ fn prepare(mut langs: Vec<Lang>) -> Vec<Lang> {
     }
     langs
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LANGS;
+
+    // The README's language count is the number of table entries a file can be recognized as; entries that exist only as region rules do not count.
+    #[test]
+    fn readme_language_count_matches_the_table() {
+        let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
+            .expect("read README.md");
+        let recognizable = LANGS
+            .iter()
+            .filter(|lang| {
+                !lang.extensions.is_empty() || !lang.names.is_empty() || !lang.shebangs.is_empty()
+            })
+            .count();
+        let claimed = format!("in {recognizable} languages.");
+        assert!(
+            readme.contains(&claimed),
+            "README.md does not say {claimed:?}; the table has {recognizable} recognizable languages"
+        );
+    }
+}
