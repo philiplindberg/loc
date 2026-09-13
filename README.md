@@ -10,20 +10,30 @@ Counts lines of code per language across a directory tree. Honors `.gitignore`, 
 | CSS | `.css` |
 | Dart | `.dart` |
 | Go | `.go` |
+| Groovy | `.groovy` `.gvy` `.gradle` |
 | HTML | `.html` `.htm` |
+| Java | `.java` |
 | JavaScript | `.js` `.mjs` `.cjs` `.jsx`, `#!` `node` `nodejs` |
 | JSON | `.json` `.jsonc` |
+| Kotlin | `.kt` `.kts` |
+| Less | `.less` |
 | Markdown | `.md` `.markdown` |
+| Objective-C | `.m` `.mm` |
 | Python | `.py` `.pyi`, `#!` `python` `python2` `python3` |
 | Rip | `.rip` |
 | Ruby | `.rb` `.rake` `.gemspec`, `Gemfile`, `Rakefile`, `#!` `ruby` |
 | Rust | `.rs` |
+| Sass | `.sass` |
+| Scala | `.scala` `.sc` `.sbt` |
+| SCSS | `.scss` |
 | Shell | `.sh` `.bash` `.zsh` `.ksh`, `.bashrc` and other rc files, `#!` `sh` `bash` `zsh` `ksh` `dash` |
 | SQL | `.sql` |
 | Svelte | `.svelte` |
+| Swift | `.swift` |
 | TOML | `.toml` |
 | TypeScript | `.ts` `.tsx` `.mts` `.cts` |
 | Vue | `.vue` |
+| XML | `.xml` `.xsd` `.xsl` `.xslt` |
 | YAML | `.yml` `.yaml` |
 | Zig | `.zig` |
 

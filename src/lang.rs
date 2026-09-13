@@ -447,6 +447,112 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         markup("HTML", &[".html", ".htm"], [0xe3, 0x4c, 0x26]),
         markup("Vue", &[".vue"], [0x41, 0xb8, 0x83]),
         markup("Svelte", &[".svelte"], [0xff, 0x3e, 0x00]),
+        Lang {
+            name: "Java",
+            extensions: &[".java"],
+            line: b"//",
+            block_open: b"/*",
+            block_close: b"*/",
+            strings: vec![kind(b"\"\"\"", b"\"\"\"", true, true), DQ],
+            chars: Chars::Always,
+            color: [0xb0, 0x72, 0x19],
+            ..NONE
+        },
+        Lang {
+            name: "Kotlin",
+            extensions: &[".kt", ".kts"],
+            line: b"//",
+            block_open: b"/*",
+            block_close: b"*/",
+            nests: true,
+            strings: vec![
+                interpolating(b"\"\"\"", b"\"\"\"", false, true, DOLLAR_INTERP),
+                interpolating(b"\"", b"\"", true, false, DOLLAR_INTERP),
+            ],
+            chars: Chars::Always,
+            color: [0xa9, 0x7b, 0xff],
+            ..NONE
+        },
+        Lang {
+            name: "Scala",
+            extensions: &[".scala", ".sc", ".sbt"],
+            line: b"//",
+            block_open: b"/*",
+            block_close: b"*/",
+            nests: true,
+            strings: vec![
+                interpolating(b"\"\"\"", b"\"\"\"", false, true, DOLLAR_INTERP),
+                interpolating(b"\"", b"\"", true, false, DOLLAR_INTERP),
+            ],
+            chars: Chars::Rust,
+            color: [0xc2, 0x2d, 0x40],
+            ..NONE
+        },
+        Lang {
+            name: "Groovy",
+            extensions: &[".groovy", ".gvy", ".gradle"],
+            line: b"//",
+            block_open: b"/*",
+            block_close: b"*/",
+            strings: vec![
+                interpolating(b"\"\"\"", b"\"\"\"", true, true, DOLLAR_INTERP),
+                kind(b"'''", b"'''", true, true),
+                interpolating(b"\"", b"\"", true, false, DOLLAR_INTERP),
+                SQ,
+            ],
+            color: [0x42, 0x98, 0xb8],
+            ..NONE
+        },
+        Lang {
+            name: "Swift",
+            extensions: &[".swift"],
+            line: b"//",
+            block_open: b"/*",
+            block_close: b"*/",
+            nests: true,
+            strings: vec![kind(b"\"\"\"", b"\"\"\"", true, true), DQ],
+            color: [0xf0, 0x51, 0x38],
+            ..NONE
+        },
+        c_family("Objective-C", &[".m", ".mm"], [0x43, 0x8e, 0xff]),
+        Lang {
+            name: "SCSS",
+            extensions: &[".scss"],
+            line: b"//",
+            block_open: b"/*",
+            block_close: b"*/",
+            strings: vec![DQ, SQ],
+            color: [0xc6, 0x53, 0x8c],
+            ..NONE
+        },
+        Lang {
+            name: "Sass",
+            extensions: &[".sass"],
+            line: b"//",
+            block_open: b"/*",
+            block_close: b"*/",
+            strings: vec![DQ, SQ],
+            color: [0xa5, 0x3b, 0x70],
+            ..NONE
+        },
+        Lang {
+            name: "Less",
+            extensions: &[".less"],
+            line: b"//",
+            block_open: b"/*",
+            block_close: b"*/",
+            strings: vec![DQ, SQ],
+            color: [0x1d, 0x36, 0x5d],
+            ..NONE
+        },
+        Lang {
+            name: "XML",
+            extensions: &[".xml", ".xsd", ".xsl", ".xslt"],
+            block_open: b"<!--",
+            block_close: b"-->",
+            color: [0x00, 0x60, 0xac],
+            ..NONE
+        },
     ])
 });
 

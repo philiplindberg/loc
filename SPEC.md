@@ -108,7 +108,7 @@ Classification needs one pass over the file's bytes tracking three states: insid
 
 **Strings.** Each string kind has an opening sequence, a closing sequence, whether backslash escapes the next byte, and whether it may span lines. An unterminated single-line string ends at the newline and the scanner returns to normal state; a backslash immediately before the newline does not extend it. This bounds the damage of a stray quote to one line.
 
-**Interpolation.** Some string kinds interpolate: inside one, an interpolation opener enters code until the matching `}`, counting nested braces; the string resumes after it. The openers are `${` in a TypeScript or JavaScript template literal and in every Dart string, `#{` and `${` in a Rip `"…"` string or `"""…"""` heredoc, and `#{` in a Rip heregex and in the CoffeeScript and Ruby kinds marked below. Code inside an interpolation may open strings, comments, regex literals, and further interpolating strings, each tracked the same way. An escaped opener (`\${`, `\#{`) is text.
+**Interpolation.** Some string kinds interpolate: inside one, an interpolation opener enters code until the matching `}`, counting nested braces; the string resumes after it. The openers are `${` in a TypeScript or JavaScript template literal, in every Dart string, and in the double-quoted kinds of Kotlin, Scala, and Groovy, `#{` and `${` in a Rip `"…"` string or `"""…"""` heredoc, and `#{` in a Rip heregex and in the CoffeeScript and Ruby kinds marked below. Code inside an interpolation may open strings, comments, regex literals, and further interpolating strings, each tracked the same way. An escaped opener (`\${`, `\#{`) is text.
 
 **Char literals** (Go, Rust, Zig) are single-line string kinds delimited by `'` with escapes. In Go and Zig every `'` outside a string or comment opens one. In Rust, `'` also introduces lifetimes and labels (`'a`, `'outer:`), which have no closing quote, so `'` opens a char literal only if the next byte is `\`, or the byte after the next is `'`; otherwise it is not a delimiter.
 
@@ -152,6 +152,16 @@ Classification needs one pass over the file's bytes tracking three states: insid
 | HTML | `.html` `.htm` | none | `<!-- -->` | no | none; `<script>` is JavaScript, `<style>` is CSS | `#e34c26` |
 | Vue | `.vue` | none | `<!-- -->` | no | identical to HTML | `#41b883` |
 | Svelte | `.svelte` | none | `<!-- -->` | no | identical to HTML | `#ff3e00` |
+| Java | `.java` | `//` | `/* */` | no | `"…"` single, escapes; `"""…"""` multi, escapes; `'…'` char | `#b07219` |
+| Kotlin | `.kt` `.kts` | `//` | `/* */` | **yes** | `"…"` single, escapes, `${}` interpolation; `"""…"""` multi, no escapes, `${}` interpolation; `'…'` char | `#a97bff` |
+| Scala | `.scala` `.sc` `.sbt` | `//` | `/* */` | **yes** | `"…"` single, escapes, `${}` interpolation; `"""…"""` multi, no escapes, `${}` interpolation; `'…'` char with lookahead | `#c22d40` |
+| Groovy | `.groovy` `.gvy` `.gradle` | `//` | `/* */` | no | `"…"` single, escapes, `${}` interpolation; `'…'` single, escapes; `"""…"""` multi, escapes, `${}` interpolation; `'''…'''` multi, escapes | `#4298b8` |
+| Swift | `.swift` | `//` | `/* */` | **yes** | `"…"` single, escapes; `"""…"""` multi, escapes | `#f05138` |
+| Objective-C | `.m` `.mm` | `//` | `/* */` | no | identical to C | `#438eff` |
+| SCSS | `.scss` | `//` | `/* */` | no | `"…"` `'…'` single, escapes | `#c6538c` |
+| Sass | `.sass` | `//` | `/* */` | no | identical to SCSS | `#a53b70` |
+| Less | `.less` | `//` | `/* */` | no | identical to SCSS | `#1d365d` |
+| XML | `.xml` `.xsd` `.xsl` `.xslt` | none | `<!-- -->` | no | none | `#0060ac` |
 
 Colors are GitHub linguist's, except JSON and Markdown, whose linguist colors are unreadable on a dark background and take Seti's, and Rip, which linguist does not list.
 
@@ -169,11 +179,13 @@ In a Rip render block, a line whose first non-whitespace bytes are `#` and a let
 
 A YAML block scalar (`|` or `>`) has no delimiter, so a `#` line inside one is a comment. Ruby's `%w[…]` and `%q(…)` literals, `__END__` data sections, and a second heredoc opened on the same line are not parsed, and an indented `=begin` opens a block comment where Ruby would not. Shell's backtick substitutions are code, not strings. A `<<` directly followed by a word inside Shell arithmetic (`$((1<<2))`) or a Ruby expression without spaces (`1<<2`) opens a phantom heredoc that runs until a line equal to that word. SQL block comments do not nest as PostgreSQL's do, and MySQL's `#` comments are code. In markup, a `<script` or `<style` inside an attribute value opens a region, and a `</script>` inside a JavaScript string or comment does not close one.
 
+Swift's `\(…)` interpolation is not tracked, so a quote inside one opens a phantom that ends at the newline, and its `#"…"#` raw strings are read as ordinary strings. Scala's `${` is read as interpolation in every double-quoted string, prefixed or not. Groovy's slashy strings (`/…/`) are code. A `.m` file is Objective-C, never MATLAB, and `.mm` counts as Objective-C rather than Objective-C++. An XML `CDATA` section is not parsed, so `<!--` inside one opens a comment. A `<style lang="scss">` block in Vue or Svelte is scanned by CSS's rules, so its `//` comments are code.
+
 A `.h` file is C, as GitHub linguist classifies it, whatever language its neighbors are in. C++ raw string literals (`R"(…)"`) are not parsed: the scanner sees an ordinary `"` string, single-line, so a quote inside one opens a phantom that ends at the newline. A filename that is not valid UTF-8 is matched by its bytes.
 
 ## Non-goals
 
-git's index, `.git/info/exclude`, global excludes, `.ignore` and tool-specific ignore files, submodules, encoding detection beyond the `NUL` check, per-file output, COCOMO estimates, complexity metrics, languages beyond the twenty-two above.
+git's index, `.git/info/exclude`, global excludes, `.ignore` and tool-specific ignore files, submodules, encoding detection beyond the `NUL` check, per-file output, COCOMO estimates, complexity metrics, languages beyond the thirty-two above.
 
 ## Conformance
 
