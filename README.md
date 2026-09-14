@@ -2,20 +2,20 @@
 
 Counts lines of code across a directory tree in 34 languages. Honors `.gitignore` and `--exclude` patterns, skips binaries and symlinks, and reports what it skipped by size so you can tell whether the count is representative.
 
-`loc --exclude fixtures .` on this repository:
+`loc -e fixtures .` on this repository:
 
 ```
 ──────────────────────────────────────────────────────────────────────────
 Language      Files      Lines      Blank    Comment       Code          %
 ──────────────────────────────────────────────────────────────────────────
-Rust              8      3,352        191         86      3,075       92.8
-Markdown          2        317         84          0        233        7.0
+Rust              8      3,555        202         91      3,262       93.0
+Markdown          2        336         93          0        243        6.9
 TOML              1          4          0          0          4        0.1
 ──────────────────────────────────────────────────────────────────────────
-Total            11      3,673        275         86      3,312      100.0
+Total            11      3,895        295         91      3,509      100.0
 ──────────────────────────────────────────────────────────────────────────
 
-2 of 13 files skipped, 165 B of 151.5 KB of text (0.1%)
+2 of 13 files skipped, 165 B of 161.1 KB of text (0.1%)
 ───────────────────────────────────────────
 Skipped         Files       Size          %
 ───────────────────────────────────────────
@@ -39,16 +39,32 @@ ln -sf "$PWD/target/release/loc" ~/.local/bin/loc
 ## Usage
 
 ```
-loc                              count the current directory
-loc src tests                    count several paths; a file reached twice counts once
-loc --json .                     the same data as JSON, for scripts
-loc --exclude vendor .           skip what a .gitignore line would; repeat the flag for more
-loc --exclude-lang C .           skip every file of a language, named as the table below prints it
-loc --no-ignore .                count what .gitignore files exclude
-loc --languages                  list the languages and the files each one claims
+loc counts lines of code per language across a directory tree.
+
+Usage: loc [OPTIONS] [PATH...]
+
+Arguments:
+  [PATH...]                Files or directories to count (default: the current directory)
+
+Options:
+  -e, --exclude PATTERN    Skip what this .gitignore line would, under every PATH; repeatable
+  -x, --exclude-lang NAME  Skip every file of a language, named as --languages prints it; repeatable
+      --no-ignore          Count files that .gitignore files exclude
+      --json               Print the report as JSON
+      --no-color           Plain output even on a terminal
+      --jobs N             Threads that read and count files (default: all cores)
+  -l, --languages          List the languages and the files each one claims
+  -h, --help               Show this help
+
+Examples:
+  loc                      Count the current directory
+  loc src tests            Count several paths; a file reached twice counts once
+  loc -e '*.min.js' .      Skip what that .gitignore line would
+  loc -x c -x c++ .        Skip whole languages
+  loc --json . | jq .total.code
 ```
 
-`--exclude` takes one `.gitignore` line per flag, with the same rules: `vendor` at any depth, `/vendor` only at the root, `vendor/` only directories, `!name` to re-include. It applies before any `.gitignore` file and with `--no-ignore` too. `--exclude-lang` drops a whole language the same way, by name and regardless of case, so `--exclude-lang c` skips every `.c` and `.h` file. `--jobs N` bounds the counting threads and never changes the output. `-h` prints the full usage.
+`--exclude` takes one `.gitignore` line per flag, with the same rules: `vendor` at any depth, `/vendor` only at the root, `vendor/` only directories, `!name` to re-include. It applies before any `.gitignore` file and with `--no-ignore` too. `--exclude-lang` drops a whole language the same way, by name and regardless of case, so `-x c` skips every `.c` and `.h` file. `--jobs N` bounds the counting threads and never changes the output.
 
 ## Languages
 

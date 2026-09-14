@@ -182,6 +182,16 @@ fn help_matches_the_spec() {
 }
 
 #[test]
+fn readme_usage_is_the_help_output() {
+    let readme = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md")).unwrap();
+    let section = &readme[readme.find("## Usage").unwrap()..];
+    let start = section.find("```\n").unwrap() + 4;
+    let block = &section[start..start + section[start..].find("```").unwrap()];
+    let s = Scratch::new();
+    assert_eq!(stdout(&run(&["-h"], &s.0)), block);
+}
+
+#[test]
 fn several_paths_sum_and_a_file_reached_twice_counts_once() {
     let s = Scratch::new();
     s.file("src/main.rs", "x\n");
@@ -371,6 +381,43 @@ fn exclude_lang_with_an_unknown_or_missing_name_is_a_usage_error() {
     );
     assert_eq!(code(&run(&["--exclude-lang", "PHP code", "."], &s.0)), 1);
     assert_eq!(code(&run(&["--exclude-lang", "c#", "."], &s.0)), 0);
+}
+
+#[test]
+fn short_flags_are_exact_aliases_that_take_the_next_argument_and_do_not_bundle() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    s.file("vendor/v.rs", "x\n");
+    s.file("c.py", "x\n");
+    let out = |args: &[&str]| run(args, &s.0);
+    assert_eq!(
+        stdout(&out(&["--json", "-e", "vendor", "-x", "python", "."])),
+        stdout(&out(&[
+            "--json",
+            "--exclude",
+            "vendor",
+            "--exclude-lang",
+            "python",
+            "."
+        ]))
+    );
+    assert_eq!(
+        files_of(&stdout(&out(&["--json", "-e", "vendor", "."])), "Rust"),
+        1
+    );
+    assert_eq!(stdout(&out(&["-l"])), stdout(&out(&["--languages"])));
+    assert!(!stdout(&out(&["-l"])).is_empty());
+    for bad in [
+        &["-e=vendor", "."][..],
+        &["-x=python", "."],
+        &["-el", "."],
+        &["-e"],
+        &["-x"],
+    ] {
+        let bad_run = out(bad);
+        assert_eq!(code(&bad_run), 1, "{bad:?}");
+        assert!(bad_run.stdout.is_empty(), "{bad:?}");
+    }
 }
 
 #[test]

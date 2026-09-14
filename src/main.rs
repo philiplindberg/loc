@@ -16,26 +16,38 @@ use std::process::exit;
 
 macro_rules! usage {
     () => {
-        "usage: loc [--json] [--no-color] [--no-ignore] [--exclude PATTERN]... [--exclude-lang NAME]... [--jobs N] [PATH...]"
+        "Usage: loc [OPTIONS] [PATH...]"
     };
 }
 
 const USAGE: &str = usage!();
 
 const HELP: &str = concat!(
+    "loc counts lines of code per language across a directory tree.
+
+",
     usage!(),
     "
 
-Count lines of code per language under each PATH (default: the current directory).
+Arguments:
+  [PATH...]                Files or directories to count (default: the current directory)
 
-  --json               print the report as JSON
-  --languages          list the languages and the files each one claims
-  --no-color           plain output even on a terminal
-  --no-ignore          count files that .gitignore excludes
-  --exclude PATTERN    skip what this .gitignore line would, under every PATH; repeatable
-  --exclude-lang NAME  skip every file of this language, named as --languages prints it; repeatable
-  --jobs N             threads that read and count files (default: all cores)
-  -h, --help           show this help
+Options:
+  -e, --exclude PATTERN    Skip what this .gitignore line would, under every PATH; repeatable
+  -x, --exclude-lang NAME  Skip every file of a language, named as --languages prints it; repeatable
+      --no-ignore          Count files that .gitignore files exclude
+      --json               Print the report as JSON
+      --no-color           Plain output even on a terminal
+      --jobs N             Threads that read and count files (default: all cores)
+  -l, --languages          List the languages and the files each one claims
+  -h, --help               Show this help
+
+Examples:
+  loc                      Count the current directory
+  loc src tests            Count several paths; a file reached twice counts once
+  loc -e '*.min.js' .      Skip what that .gitignore line would
+  loc -x c -x c++ .        Skip whole languages
+  loc --json . | jq .total.code
 "
 );
 
@@ -78,7 +90,7 @@ fn parse(args: &[OsString]) -> Result<Options, Exit> {
     if args
         .iter()
         .take_while(|a| *a != "--")
-        .any(|a| a == "--languages")
+        .any(|a| a == "--languages" || a == "-l")
     {
         return Err(Exit::Languages {
             no_color: args.iter().any(|a| a == "--no-color"),
@@ -105,14 +117,14 @@ fn parse(args: &[OsString]) -> Result<Options, Exit> {
             opts.no_color = true;
         } else if arg == "--no-ignore" {
             opts.no_ignore = true;
-        } else if arg == "--exclude" || arg.starts_with("--exclude=") {
+        } else if arg == "--exclude" || arg == "-e" || arg.starts_with("--exclude=") {
             match value("--exclude", &mut i) {
                 Some(pattern) if !pattern.is_empty() => {
                     opts.excludes.push(pattern.as_bytes().to_vec());
                 }
                 _ => return Err(Exit::Usage("loc: --exclude needs a pattern".to_string())),
             }
-        } else if arg == "--exclude-lang" || arg.starts_with("--exclude-lang=") {
+        } else if arg == "--exclude-lang" || arg == "-x" || arg.starts_with("--exclude-lang=") {
             let name = value("--exclude-lang", &mut i).unwrap_or_default();
             let name = name.to_string_lossy();
             match lang::by_language(&name) {

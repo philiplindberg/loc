@@ -5,21 +5,32 @@ Counts lines of source code per language across a directory tree. The program mu
 ## Command line
 
 ```
-usage: loc [--json] [--no-color] [--no-ignore] [--exclude PATTERN]... [--exclude-lang NAME]... [--jobs N] [PATH...]
+loc counts lines of code per language across a directory tree.
 
-Count lines of code per language under each PATH (default: the current directory).
+Usage: loc [OPTIONS] [PATH...]
 
-  --json               print the report as JSON
-  --languages          list the languages and the files each one claims
-  --no-color           plain output even on a terminal
-  --no-ignore          count files that .gitignore excludes
-  --exclude PATTERN    skip what this .gitignore line would, under every PATH; repeatable
-  --exclude-lang NAME  skip every file of this language, named as --languages prints it; repeatable
-  --jobs N             threads that read and count files (default: all cores)
-  -h, --help           show this help
+Arguments:
+  [PATH...]                Files or directories to count (default: the current directory)
+
+Options:
+  -e, --exclude PATTERN    Skip what this .gitignore line would, under every PATH; repeatable
+  -x, --exclude-lang NAME  Skip every file of a language, named as --languages prints it; repeatable
+      --no-ignore          Count files that .gitignore files exclude
+      --json               Print the report as JSON
+      --no-color           Plain output even on a terminal
+      --jobs N             Threads that read and count files (default: all cores)
+  -l, --languages          List the languages and the files each one claims
+  -h, --help               Show this help
+
+Examples:
+  loc                      Count the current directory
+  loc src tests            Count several paths; a file reached twice counts once
+  loc -e '*.min.js' .      Skip what that .gitignore line would
+  loc -x c -x c++ .        Skip whole languages
+  loc --json . | jq .total.code
 ```
 
-`-h` or `--help` anywhere on the command line prints exactly that to stdout and exits `0`; a usage error prints its first line to stderr. Otherwise `--languages` anywhere prints the language list to stdout and exits `0`: a table in the layout under Output with every column left-aligned and no trailing spaces on a line, columns `Language` and `Files`, one language per row sorted by name compared byte-wise, `Files` holding the language's extensions and then its names in table order separated by single spaces (shebang interpreters are not listed), framed by rules above and below the header. A cell's items wrap so that no column exceeds 40 characters: the items that do not fit continue on following lines under the same column, breaking only between items, with the other columns of those lines empty. It is styled like the language table when output is styled: the dot prefix on a language's first line, the header bold, the rules dim. With no `PATH`, `.` is counted. Several may be given: each is counted as below and the sums merge, and a file reachable through more than one `PATH` is counted once. `--` ends the flags, so a `PATH` may begin with `-`. A path that is a file is counted as that file; a directory is walked recursively. `PATH` itself is followed if it is a symbolic link, so a link names its target; a symbolic link met inside a walk is neither followed nor counted. Hidden files and directories are included. An entry named `.git`, file or directory, is never counted, entered, or reported, with or without `--no-ignore`. `.gitignore` files are applied as described under Ignore rules unless `--no-ignore` is given; `--exclude` patterns and `--exclude-lang` names apply in either case. `--jobs` sets how many threads read and count files; the default is the machine's available parallelism. It bounds the counting threads, not the process: the walk may run beside them, and a runtime's own threads are outside it. A flag's value is given as `--jobs=N` or `--jobs N`, and likewise for `--exclude` and `--exclude-lang`. Neither the value nor visit order affects output: every number is a sum and the table is sorted.
+`-h` or `--help` anywhere on the command line prints exactly that to stdout and exits `0`; a usage error prints its message and then the `Usage:` line to stderr. Otherwise `--languages` anywhere prints the language list to stdout and exits `0`: a table in the layout under Output with every column left-aligned and no trailing spaces on a line, columns `Language` and `Files`, one language per row sorted by name compared byte-wise, `Files` holding the language's extensions and then its names in table order separated by single spaces (shebang interpreters are not listed), framed by rules above and below the header. A cell's items wrap so that no column exceeds 40 characters: the items that do not fit continue on following lines under the same column, breaking only between items, with the other columns of those lines empty. It is styled like the language table when output is styled: the dot prefix on a language's first line, the header bold, the rules dim. With no `PATH`, `.` is counted. Several may be given: each is counted as below and the sums merge, and a file reachable through more than one `PATH` is counted once. `--` ends the flags, so a `PATH` may begin with `-`. A path that is a file is counted as that file; a directory is walked recursively. `PATH` itself is followed if it is a symbolic link, so a link names its target; a symbolic link met inside a walk is neither followed nor counted. Hidden files and directories are included. An entry named `.git`, file or directory, is never counted, entered, or reported, with or without `--no-ignore`. `.gitignore` files are applied as described under Ignore rules unless `--no-ignore` is given; `--exclude` patterns and `--exclude-lang` names apply in either case. `--jobs` sets how many threads read and count files; the default is the machine's available parallelism. It bounds the counting threads, not the process: the walk may run beside them, and a runtime's own threads are outside it. A flag's value is given as `--jobs=N` or `--jobs N`, and likewise for `--exclude` and `--exclude-lang`. `-e`, `-x`, and `-l` are exact aliases of `--exclude`, `--exclude-lang`, and `--languages`, except that a short flag takes its value only in the next argument, so `-e=vendor` is an unknown flag; short flags do not bundle, so `-el` is one too. Neither the value nor visit order affects output: every number is a sum and the table is sorted.
 
 Exit codes: `0` on success, `1` for a usage error (unknown flag, `--jobs` without a positive integer, `--exclude` without a pattern, `--exclude-lang` without a name `--languages` prints), `2` if any `PATH` does not exist or cannot be read; every `PATH` is checked before anything is counted, so nothing is written to stdout in that case. A file inside a walk that cannot be read is skipped under the label `unreadable` with a warning on stderr and does not change the exit code; a directory that cannot be listed is skipped with a warning and counts nothing. The report goes to stdout; errors go to stderr.
 
