@@ -36,6 +36,7 @@ Options:
   -e, --exclude PATTERN    Skip what this .gitignore line would, under every PATH; repeatable
   -x, --exclude-lang NAME  Skip every file of a language, named as --languages prints it; repeatable
       --no-ignore          Count files that .gitignore files exclude
+  -f, --by-file            Add a row per file under its language
       --json               Print the report as JSON
       --no-color           Plain output even on a terminal
       --jobs N             Threads that read and count files (default: all cores)
@@ -55,6 +56,7 @@ struct Options {
     json: bool,
     no_color: bool,
     no_ignore: bool,
+    by_file: bool,
     excludes: Vec<Vec<u8>>,
     excluded_langs: Vec<bool>, // by index into lang::LANGS
     jobs: usize,
@@ -72,6 +74,7 @@ fn parse(args: &[OsString]) -> Result<Options, Exit> {
         json: false,
         no_color: false,
         no_ignore: false,
+        by_file: false,
         excludes: Vec::new(),
         excluded_langs: vec![false; lang::LANGS.len()],
         jobs: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
@@ -117,6 +120,8 @@ fn parse(args: &[OsString]) -> Result<Options, Exit> {
             opts.no_color = true;
         } else if arg == "--no-ignore" {
             opts.no_ignore = true;
+        } else if arg == "--by-file" || arg == "-f" {
+            opts.by_file = true;
         } else if arg == "--exclude" || arg == "-e" || arg.starts_with("--exclude=") {
             match value("--exclude", &mut i) {
                 Some(pattern) if !pattern.is_empty() => {
@@ -196,6 +201,7 @@ fn run(args: &[OsString]) -> i32 {
     let report = Report::new(walk::count_trees(
         &opts.roots,
         opts.no_ignore,
+        opts.by_file,
         &opts.excludes,
         &opts.excluded_langs,
         opts.jobs,

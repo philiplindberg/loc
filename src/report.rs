@@ -2,9 +2,10 @@
 
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::os::unix::ffi::OsStrExt;
 
 use crate::lang::LANGS;
-use crate::walk::{Skipped, Sums};
+use crate::walk::{FileRow, Skipped, Sums};
 
 pub struct LangRow {
     name: &'static str,
@@ -15,6 +16,16 @@ pub struct LangRow {
     code: usize,
     bytes: u64,
     color: [u8; 3],
+    by_file: Vec<FileEntry>, // empty unless --by-file
+}
+
+pub struct FileEntry {
+    path: String,
+    lines: usize,
+    blank: usize,
+    comment: usize,
+    code: usize,
+    bytes: u64,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -65,17 +76,26 @@ pub struct Report {
     total: Totals,
     text: SkippedGroup,
     binary: SkippedGroup,
+    by_file: bool,
 }
 
 impl Report {
-    // Orders the sums as the spec requires: languages by code descending then name, labels by size descending then label, both byte-wise.
+    // Orders the sums as the spec requires: languages by code descending then name, files within a language by code descending then path, labels by size descending then label, all byte-wise.
     pub fn new(sums: Sums) -> Report {
         let mut report = Report {
             languages: Vec::new(),
             total: Totals::default(),
             text: SkippedGroup::default(),
             binary: SkippedGroup::default(),
+            by_file: sums.by_file.is_some(),
         };
+        let mut by_file: Vec<Vec<FileEntry>> = (0..LANGS.len()).map(|_| Vec::new()).collect();
+        for row in sums.by_file.into_iter().flatten() {
+            by_file[row.lang].push(FileEntry::from(row));
+        }
+        for files in &mut by_file {
+            files.sort_by(|a, b| b.code.cmp(&a.code).then_with(|| a.path.cmp(&b.path)));
+        }
         for (i, lang) in LANGS.iter().enumerate() {
             if sums.files[i] == 0 {
                 continue;
@@ -90,6 +110,7 @@ impl Report {
                 code: counts.code,
                 bytes: sums.bytes[i],
                 color: lang.color,
+                by_file: std::mem::take(&mut by_file[i]),
             });
             report.total.files += sums.files[i];
             report.total.lines += counts.lines;
@@ -115,7 +136,7 @@ impl Report {
             }
             let _ = write!(
                 out,
-                "{{\"name\":{},\"files\":{},\"lines\":{},\"blank\":{},\"comment\":{},\"code\":{},\"bytes\":{}}}",
+                "{{\"name\":{},\"files\":{},\"lines\":{},\"blank\":{},\"comment\":{},\"code\":{},\"bytes\":{}",
                 json_str(row.name),
                 row.files,
                 row.lines,
@@ -124,6 +145,27 @@ impl Report {
                 row.code,
                 row.bytes
             );
+            if self.by_file {
+                out.push_str(",\"by_file\":[");
+                for (i, file) in row.by_file.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    let _ = write!(
+                        out,
+                        "{{\"path\":{},\"lines\":{},\"blank\":{},\"comment\":{},\"code\":{},\"bytes\":{}}}",
+                        json_str(&file.path),
+                        file.lines,
+                        file.blank,
+                        file.comment,
+                        file.code,
+                        file.bytes
+                    );
+                }
+                out.push_str("]}");
+            } else {
+                out.push('}');
+            }
         }
         let total = self.total;
         let _ = write!(
@@ -206,10 +248,11 @@ impl Report {
                 share(totals.code as u64, self.total.code as u64),
             ]
         };
-        let body: Vec<Vec<String>> = self
-            .languages
-            .iter()
-            .map(|lang| {
+        // A language row carries its color for the dot; a file row under it has none.
+        let mut body: Vec<(Option<[u8; 3]>, Vec<String>)> = Vec::new();
+        for lang in &self.languages {
+            body.push((
+                Some(lang.color),
                 row(
                     lang.name,
                     Totals {
@@ -220,11 +263,25 @@ impl Report {
                         code: lang.code,
                         bytes: lang.bytes,
                     },
-                )
-            })
-            .collect();
+                ),
+            ));
+            for file in &lang.by_file {
+                body.push((
+                    None,
+                    vec![
+                        format!("{prefix}{}", shorten(&file.path)),
+                        String::new(),
+                        with_commas(file.lines),
+                        with_commas(file.blank),
+                        with_commas(file.comment),
+                        with_commas(file.code),
+                        share(file.code as u64, self.total.code as u64),
+                    ],
+                ));
+            }
+        }
         let total_row = row("Total", self.total);
-        let mut all_rows = body.clone();
+        let mut all_rows: Vec<Vec<String>> = body.iter().map(|(_, cells)| cells.clone()).collect();
         all_rows.push(total_row.clone());
         let headers: Vec<String> = [
             &format!("{prefix}Language")[..],
@@ -247,13 +304,25 @@ impl Report {
         out.push(style(DIM, grid.rule()));
         out.push(style(BOLD, grid.line(&grid.headers)));
         out.push(style(DIM, grid.rule()));
-        for (lang, cells) in self.languages.iter().zip(&body) {
+        // With --by-file every language is a framed section: a rule above its row, except the first, whose rule is the header's, and a rule below it before its files.
+        for (i, (color, cells)) in body.iter().enumerate() {
             let line = grid.line(cells);
-            out.push(if styled {
-                format!("{}●{RESET} {}", fg(lang.color), &line[2..])
-            } else {
-                line
-            });
+            match color {
+                Some(color) => {
+                    if self.by_file && i > 0 {
+                        out.push(style(DIM, grid.rule()));
+                    }
+                    out.push(if styled {
+                        format!("{}●{RESET} {}", fg(*color), &line[2..])
+                    } else {
+                        line
+                    });
+                    if self.by_file {
+                        out.push(style(DIM, grid.rule()));
+                    }
+                }
+                None => out.push(line),
+            }
         }
         out.push(style(DIM, grid.rule()));
         out.push(style(BOLD, grid.line(&total_row)));
@@ -408,6 +477,41 @@ fn wrap(items: &[&str]) -> Vec<String> {
 }
 
 // JSON.stringify's string escaping: quote, backslash, and control bytes; everything else as is.
+// A path shown in the table loses whole leading directories, replaced by …/, until it is within PATH_WIDTH characters or only the file name is left. The file name is never cut, so a name over the cap is the one thing that can widen the column.
+const PATH_WIDTH: usize = 40;
+
+fn shorten(path: &str) -> String {
+    if path.chars().count() <= PATH_WIDTH {
+        return path.to_string();
+    }
+    let mut rest = path;
+    while let Some(slash) = rest.find('/') {
+        rest = &rest[slash + 1..];
+        if 2 + rest.chars().count() <= PATH_WIDTH {
+            break;
+        }
+    }
+    if rest.len() == path.len() {
+        return path.to_string(); // a bare name over the cap
+    }
+    format!("\u{2026}/{rest}")
+}
+
+impl From<FileRow> for FileEntry {
+    fn from(row: FileRow) -> FileEntry {
+        let path = row.path.as_os_str().as_bytes();
+        let path = path.strip_prefix(b"./").unwrap_or(path); // a PATH of . says nothing about where the file is
+        FileEntry {
+            path: String::from_utf8_lossy(path).into_owned(),
+            lines: row.counts.lines,
+            blank: row.counts.blank,
+            comment: row.counts.comment,
+            code: row.counts.code,
+            bytes: row.bytes,
+        }
+    }
+}
+
 fn json_str(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
     out.push('"');

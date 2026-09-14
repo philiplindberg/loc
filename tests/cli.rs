@@ -421,6 +421,84 @@ fn short_flags_are_exact_aliases_that_take_the_next_argument_and_do_not_bundle()
 }
 
 #[test]
+fn by_file_lists_files_under_their_language_by_code_then_path() {
+    let s = Scratch::new();
+    s.file("b.rs", "x\ny\nz\n");
+    s.file("a.rs", "x\n");
+    s.file("c.rs", "x\n");
+    s.file("d.py", "x\n\n");
+    // The language table's layout: first column left-aligned, the rest right-aligned to seven, four spaces between.
+    let line = |cells: [&str; 7]| -> String {
+        let mut out = format!("{:<8}", cells[0]);
+        for cell in &cells[1..] {
+            out.push_str(&format!("    {cell:>7}"));
+        }
+        out
+    };
+    let rule = "\u{2500}".repeat(8 + 6 * 11);
+    let want = [
+        rule.clone(),
+        line([
+            "Language", "Files", "Lines", "Blank", "Comment", "Code", "%",
+        ]),
+        rule.clone(),
+        line(["Rust", "3", "5", "0", "0", "5", "83.3"]),
+        rule.clone(),
+        line(["b.rs", "", "3", "0", "0", "3", "50.0"]),
+        line(["a.rs", "", "1", "0", "0", "1", "16.7"]),
+        line(["c.rs", "", "1", "0", "0", "1", "16.7"]),
+        rule.clone(),
+        line(["Python", "1", "2", "1", "0", "1", "16.7"]),
+        rule.clone(),
+        line(["d.py", "", "2", "1", "0", "1", "16.7"]),
+        rule.clone(),
+        line(["Total", "4", "7", "1", "0", "6", "100.0"]),
+        rule.clone(),
+    ]
+    .join("\n");
+    let table = stdout(&run(&["-f", "."], &s.0));
+    assert!(table.starts_with(&(want + "\n\n")), "{table}");
+    let json = stdout(&run(&["--json", "--by-file", "."], &s.0));
+    assert!(
+        json.contains("\"code\":5,\"bytes\":10,\"by_file\":[{\"path\":\"b.rs\",\"lines\":3,\"blank\":0,\"comment\":0,\"code\":3,\"bytes\":6},{\"path\":\"a.rs\","),
+        "{json}"
+    );
+    assert!(!stdout(&run(&["--json", "."], &s.0)).contains("by_file"));
+}
+
+#[test]
+fn by_file_drops_leading_directories_from_a_long_path_but_never_the_name() {
+    let s = Scratch::new();
+    s.file("api/migrations/20260912010125_result_matching.sql", "x\n");
+    s.file(
+        "deep/this_file_name_is_far_longer_than_forty_chars.rs",
+        "x\n",
+    );
+    s.file("a_bare_name_that_is_far_longer_than_forty_chars.rs", "x\n");
+    s.file("exactly/forty/characters/long/path/a.rs", "x\n");
+    let table = stdout(&run(&["-f", "."], &s.0));
+    let shown = |name: &str| -> String {
+        let line = table.lines().find(|l| l.contains(name)).expect(name);
+        line[..line.find("  ").unwrap()].to_string()
+    };
+    assert_eq!(
+        shown("result_matching"),
+        "\u{2026}/20260912010125_result_matching.sql"
+    );
+    assert_eq!(
+        shown("this_file_name"),
+        "\u{2026}/this_file_name_is_far_longer_than_forty_chars.rs"
+    );
+    assert_eq!(
+        shown("a_bare_name"),
+        "a_bare_name_that_is_far_longer_than_forty_chars.rs"
+    );
+    assert_eq!(shown("exactly"), "exactly/forty/characters/long/path/a.rs");
+    let json = stdout(&run(&["--json", "-f", "."], &s.0));
+    assert!(json.contains("\"path\":\"api/migrations/20260912010125_result_matching.sql\""));
+}
+
+#[test]
 fn languages_lists_the_table() {
     let s = Scratch::new();
     let out = run(&["--json", "--languages", "nope"], &s.0);

@@ -13,13 +13,21 @@ use crate::ignore::{IgnoreFile, ancestors, exclude_file, ignored, offset_below, 
 use crate::lang::{LANGS, binary_ext, by_ext, by_name, by_shebang};
 use crate::scan::{Counts, scan};
 
-// Sums kept by one worker: per-language totals by language index, and skipped files by label, text and binary apart.
+// Sums kept by one worker: per-language totals by language index, and skipped files by label, text and binary apart. by_file holds every counted file's own counts when --by-file asks for them, and nothing otherwise.
 pub struct Sums {
     pub langs: Vec<Counts>,
     pub files: Vec<usize>,
     pub bytes: Vec<u64>,
     pub text: HashMap<String, Skipped>,
     pub binary: HashMap<String, Skipped>,
+    pub by_file: Option<Vec<FileRow>>,
+}
+
+pub struct FileRow {
+    pub lang: usize,
+    pub path: PathBuf,
+    pub counts: Counts,
+    pub bytes: u64,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -29,17 +37,21 @@ pub struct Skipped {
 }
 
 impl Sums {
-    fn new() -> Sums {
+    fn new(by_file: bool) -> Sums {
         Sums {
             langs: vec![Counts::default(); LANGS.len()],
             files: vec![0; LANGS.len()],
             bytes: vec![0; LANGS.len()],
             text: HashMap::new(),
             binary: HashMap::new(),
+            by_file: by_file.then(Vec::new),
         }
     }
 
-    fn add(&mut self, other: &Sums) {
+    fn add(&mut self, other: Sums) {
+        if let (Some(mine), Some(theirs)) = (&mut self.by_file, other.by_file) {
+            mine.extend(theirs);
+        }
         for i in 0..LANGS.len() {
             self.files[i] += other.files[i];
             self.bytes[i] += other.bytes[i];
@@ -102,9 +114,18 @@ impl Sums {
             add(&mut self.binary, label(name), 1, buf.len() as u64);
             return;
         }
+        let counts = scan(buf, &LANGS[li]);
         self.files[li] += 1;
         self.bytes[li] += buf.len() as u64;
-        self.langs[li] += scan(buf, &LANGS[li]);
+        self.langs[li] += counts;
+        if let Some(rows) = &mut self.by_file {
+            rows.push(FileRow {
+                lang: li,
+                path: path.to_path_buf(),
+                counts,
+                bytes: buf.len() as u64,
+            });
+        }
     }
 
     fn unreadable(&mut self, path: &Path, err: &io::Error) {
@@ -309,6 +330,7 @@ fn size_on_disk(path: &Path) -> u64 {
 pub fn count_trees(
     roots: &[PathBuf],
     no_ignore: bool,
+    by_file: bool,
     excludes: &[Vec<u8>],
     excluded_langs: &[bool],
     jobs: usize,
@@ -324,7 +346,7 @@ pub fn count_trees(
         let workers: Vec<_> = (0..jobs)
             .map(|_| {
                 s.spawn(|| {
-                    let mut sums = Sums::new();
+                    let mut sums = Sums::new(by_file);
                     let mut reader = Reader {
                         buf: Vec::new(),
                         turns: &turns,
@@ -338,9 +360,9 @@ pub fn count_trees(
                 })
             })
             .collect();
-        let mut total = Sums::new();
+        let mut total = Sums::new(by_file);
         for worker in workers {
-            total.add(&worker.join().unwrap());
+            total.add(worker.join().unwrap());
         }
         total
     })

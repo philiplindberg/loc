@@ -8,14 +8,14 @@ Counts lines of code across a directory tree in 34 languages. Honors `.gitignore
 ──────────────────────────────────────────────────────────────────────────
 Language      Files      Lines      Blank    Comment       Code          %
 ──────────────────────────────────────────────────────────────────────────
-Rust              8      3,555        202         91      3,262       93.0
-Markdown          2        336         93          0        243        6.9
+Rust              8      3,640        203         91      3,346       93.0
+Markdown          2        340         94          0        246        6.8
 TOML              1          4          0          0          4        0.1
 ──────────────────────────────────────────────────────────────────────────
-Total            11      3,895        295         91      3,509      100.0
+Total            11      3,984        297         91      3,596      100.0
 ──────────────────────────────────────────────────────────────────────────
 
-2 of 13 files skipped, 165 B of 161.1 KB of text (0.1%)
+2 of 13 files skipped, 165 B of 165.5 KB of text (0.1%)
 ───────────────────────────────────────────
 Skipped         Files       Size          %
 ───────────────────────────────────────────
@@ -50,6 +50,7 @@ Options:
   -e, --exclude PATTERN    Skip what this .gitignore line would, under every PATH; repeatable
   -x, --exclude-lang NAME  Skip every file of a language, named as --languages prints it; repeatable
       --no-ignore          Count files that .gitignore files exclude
+  -f, --by-file            Add a row per file under its language
       --json               Print the report as JSON
       --no-color           Plain output even on a terminal
       --jobs N             Threads that read and count files (default: all cores)
@@ -113,7 +114,7 @@ The table is the output of `loc --languages`. A file is recognized by extension,
 
 ## Rules and tests
 
-`SPEC.md` defines every rule and the exact output; the program must agree with it byte for byte. `fixtures/cases/` holds a small file per rule, and four expected documents pin the program's output on it: `fixtures/expected.json`, `fixtures/expected-no-ignore.json`, `fixtures/expected.txt`, and `fixtures/expected-files.json`, the last with every fixture's own counts so a failure names the file. `tests/cli.rs` pins what fixtures cannot: exit codes, several paths, `--exclude`, and the ignore rules that git cannot store. `cargo test` runs all of it.
+`SPEC.md` defines every rule and the exact output; the program must agree with it byte for byte. `fixtures/cases/` holds a small file per rule, and four expected documents pin the program's output on it: `fixtures/expected.json`, `fixtures/expected-no-ignore.json`, `fixtures/expected.txt`, and `fixtures/expected-files.json`, the last the `--by-file --no-ignore` output, so every fixture's own counts are pinned and a failure names the file. `tests/cli.rs` pins what fixtures cannot: exit codes, several paths, `--exclude`, and the ignore rules that git cannot store. `cargo test` runs all of it.
 
 The expected documents are the authority: a disagreement is a bug in the program until an expected document is changed on purpose. To add a language: a row in the spec's language table, an entry in `src/lang.rs`, a fixture per rule, the fixture's counts predicted by hand before running the program, then the expected documents regenerated.
 
