@@ -8,17 +8,18 @@ Counts lines of code across a directory tree in 34 languages. Honors `.gitignore
 ──────────────────────────────────────────────────────────────────────────
 Language      Files      Lines      Blank    Comment       Code          %
 ──────────────────────────────────────────────────────────────────────────
-Rust              8      3,640        203         91      3,346       93.0
-Markdown          2        340         94          0        246        6.8
-TOML              1          4          0          0          4        0.1
+Rust              8      3,709        206         93      3,410       93.0
+Markdown          2        347         96          0        251        6.8
+TOML              1          5          0          0          5        0.1
 ──────────────────────────────────────────────────────────────────────────
-Total            11      3,984        297         91      3,596      100.0
+Total            11      4,061        302         93      3,666      100.0
 ──────────────────────────────────────────────────────────────────────────
 
-2 of 13 files skipped, 165 B of 165.5 KB of text (0.1%)
+3 of 14 files skipped, 1.2 KB of 169.8 KB of text (0.7%)
 ───────────────────────────────────────────
 Skipped         Files       Size          %
 ───────────────────────────────────────────
+LICENSE             1     1.1 KB        0.6
 .lock               1      147 B        0.1
 .gitignore          1       18 B        0.0
 ───────────────────────────────────────────
@@ -29,12 +30,18 @@ The skipped section separates text loc could not count, which is a gap, from bin
 ## Install
 
 ```
+cargo install --git https://github.com/philiplindberg/loc
+```
+
+That builds the latest commit and puts `loc` in `~/.cargo/bin`; cargo warns if that directory is not on your PATH. Run it again to update.
+
+To work on it instead, link the release build so every `cargo build --release` updates the command:
+
+```
 mkdir -p ~/.local/bin
 cargo build --release
 ln -sf "$PWD/target/release/loc" ~/.local/bin/loc
 ```
-
-`~/.local/bin` or any directory on your PATH. `loc` is a link to the release build, so every `cargo build --release` updates it and a debug build does not. `cargo install --path .` also works when `~/.cargo/bin` is on your PATH, but it copies the binary, so it needs rerunning after each change.
 
 ## Usage
 
