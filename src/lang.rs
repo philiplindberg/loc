@@ -638,6 +638,18 @@ pub const BINARY_EXTENSIONS: &[&str] = &[
     ".pdf",
 ];
 
+// Extensions that are always text and common enough to be numerous in an ordinary tree, the same test as above and with the same trade: a file with one is skipped text by its name alone, sized without being opened.
+pub const TEXT_EXTENSIONS: &[&str] = &[
+    ".txt", ".rst", ".dts", ".dtsi", ".diff", ".s", ".map", ".svg", ".snap", ".lock",
+];
+
+static TEXT_EXT: LazyLock<HashMap<&'static [u8], ()>> = LazyLock::new(|| {
+    TEXT_EXTENSIONS
+        .iter()
+        .map(|ext| (ext.as_bytes(), ()))
+        .collect()
+});
+
 static BINARY_EXT: LazyLock<HashMap<&'static [u8], ()>> = LazyLock::new(|| {
     BINARY_EXTENSIONS
         .iter()
@@ -654,6 +666,16 @@ pub fn binary_ext(ext: &[u8]) -> bool {
     lower.copy_from_slice(ext);
     lower.make_ascii_lowercase();
     BINARY_EXT.contains_key(&*lower)
+}
+
+pub fn text_ext(ext: &[u8]) -> bool {
+    let mut lower = [0; EXT_MAX];
+    let Some(lower) = lower.get_mut(..ext.len()) else {
+        return false;
+    };
+    lower.copy_from_slice(ext);
+    lower.make_ascii_lowercase();
+    TEXT_EXT.contains_key(&*lower)
 }
 
 static BY_EXT: LazyLock<HashMap<&'static [u8], usize>> = LazyLock::new(|| {
