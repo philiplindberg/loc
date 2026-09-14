@@ -88,7 +88,7 @@ A file is recognized by its extension, compared case-insensitively, against the 
 
 Binary extensions, each never text and common enough to be numerous in an ordinary tree, which is the test for adding one: `.png` `.jpg` `.jpeg` `.gif` `.ico` `.webp` `.ttf` `.otf` `.woff` `.woff2` `.zip` `.gz` `.tgz` `.bz2` `.xz` `.zst` `.7z` `.jar` `.mp3` `.mp4` `.mov` `.wav` `.webm` `.pyc` `.o` `.a` `.so` `.dylib` `.dll` `.exe` `.class` `.wasm` `.rlib` `.rmeta` `.pdf`. A text file with one of these extensions is reported as binary.
 
-Names: Ruby `Gemfile` `Rakefile`; Shell `.bashrc` `.bash_profile` `.profile` `.zshrc`. Shebangs: JavaScript `node` `nodejs`; Python `python` `python2` `python3`; CoffeeScript `coffee`; PHP `php`; Ruby `ruby`; Shell `sh` `bash` `zsh` `ksh` `dash`.
+Names: Ruby `Gemfile` `Rakefile`; Shell `.bashrc` `.bash_profile` `.profile` `.zshrc`. Shebangs: JavaScript `node` `nodejs` `bun` `deno`; Python `python` `python2` `python3`; CoffeeScript `coffee`; PHP `php`; Ruby `ruby`; Shell `sh` `bash` `zsh` `ksh` `dash`.
 
 Files are read as bytes. A leading UTF-8 byte-order mark (`EF BB BF`) is dropped. No other decoding happens; invalid UTF-8 is counted like any other bytes.
 

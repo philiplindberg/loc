@@ -250,7 +250,7 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
             [0x31, 0x78, 0xc6],
         ),
         Lang {
-            shebangs: &["node", "nodejs"],
+            shebangs: &["node", "nodejs", "bun", "deno"],
             ..js_family(
                 "JavaScript",
                 &[".js", ".mjs", ".cjs", ".jsx"],
