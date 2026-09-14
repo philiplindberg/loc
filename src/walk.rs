@@ -58,7 +58,7 @@ impl Sums {
         }
     }
 
-    fn count(&mut self, path: &Path, reader: &mut Reader) {
+    fn count(&mut self, path: &Path, reader: &mut Reader, excluded: &[bool]) {
         let name = path.file_name().map_or(&b""[..], |n| n.as_bytes());
         let ext = extension(name);
         let mut li = ext.and_then(by_ext).or_else(|| by_name(name));
@@ -91,6 +91,9 @@ impl Sums {
             }
         }
         let li = li.expect("recognized above");
+        if excluded[li] {
+            return;
+        }
         let buf = match reader.read(path) {
             Ok(buf) => buf,
             Err(err) => return self.unreadable(path, &err),
@@ -303,7 +306,13 @@ fn size_on_disk(path: &Path) -> u64 {
     fs::symlink_metadata(path).map_or(0, |m| m.len())
 }
 
-pub fn count_trees(roots: &[PathBuf], no_ignore: bool, excludes: &[Vec<u8>], jobs: usize) -> Sums {
+pub fn count_trees(
+    roots: &[PathBuf],
+    no_ignore: bool,
+    excludes: &[Vec<u8>],
+    excluded_langs: &[bool],
+    jobs: usize,
+) -> Sums {
     let (tx, rx) = sync_channel::<PathBuf>(1024);
     let rx: Mutex<Receiver<PathBuf>> = Mutex::new(rx);
     let turns = Semaphore {
@@ -323,7 +332,7 @@ pub fn count_trees(roots: &[PathBuf], no_ignore: bool, excludes: &[Vec<u8>], job
                     loop {
                         let next = rx.lock().unwrap().recv();
                         let Ok(path) = next else { break };
-                        sums.count(&path, &mut reader);
+                        sums.count(&path, &mut reader, excluded_langs);
                     }
                     sums
                 })

@@ -43,11 +43,12 @@ loc                              count the current directory
 loc src tests                    count several paths; a file reached twice counts once
 loc --json .                     the same data as JSON, for scripts
 loc --exclude vendor .           skip what a .gitignore line would; repeat the flag for more
+loc --exclude-lang C .           skip every file of a language, named as the table below prints it
 loc --no-ignore .                count what .gitignore files exclude
 loc --languages                  list the languages and the files each one claims
 ```
 
-`--exclude` takes one `.gitignore` line per flag, with the same rules: `vendor` at any depth, `/vendor` only at the root, `vendor/` only directories, `!name` to re-include. It applies before any `.gitignore` file and with `--no-ignore` too. `--jobs N` bounds the counting threads and never changes the output. `-h` prints the full usage.
+`--exclude` takes one `.gitignore` line per flag, with the same rules: `vendor` at any depth, `/vendor` only at the root, `vendor/` only directories, `!name` to re-include. It applies before any `.gitignore` file and with `--no-ignore` too. `--exclude-lang` drops a whole language the same way, by name and regardless of case, so `--exclude-lang c` skips every `.c` and `.h` file. `--jobs N` bounds the counting threads and never changes the output. `-h` prints the full usage.
 
 ## Languages
 

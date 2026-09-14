@@ -296,6 +296,83 @@ fn exclude_without_a_pattern_is_a_usage_error() {
     assert_eq!(code(&run(&["--exclude=vendor", "."], &s.0)), 0);
 }
 
+// The JSON object for one language, or an empty string when it is absent.
+fn entry(json: &str, language: &str) -> String {
+    let key = format!("{{\"name\":\"{language}\",");
+    json.find(&key).map_or(String::new(), |i| {
+        let rest = &json[i..];
+        rest[..=rest.find('}').unwrap()].to_string()
+    })
+}
+
+#[test]
+fn exclude_lang_drops_the_language_from_every_total_and_label() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    s.file("b.rs", "x\n");
+    s.file("c.py", "x\n");
+    s.file("notes.txt", "x\n");
+    fs::write(s.0.join("blob.rs"), b"x\0y").unwrap();
+    s.file(".gitignore", "c.py\n");
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    let plain = json(&["--json", "--no-ignore", "."]);
+    assert_eq!(files_of(&plain, "Rust"), 2);
+    assert!(plain.contains("\"total\":{\"files\":3,"), "{plain}");
+    assert!(plain.contains("\"binary\":{\"files\":1,"), "{plain}");
+    let without = json(&["--json", "--no-ignore", "--exclude-lang", "rust", "."]);
+    assert_eq!(entry(&without, "Rust"), "");
+    assert_eq!(files_of(&without, "Python"), 1);
+    assert!(without.contains("\"total\":{\"files\":1,"), "{without}");
+    assert!(
+        without.contains("\"label\":\".txt\",\"files\":1,"),
+        "{without}"
+    );
+    assert!(without.contains("\"binary\":{\"files\":0,"), "{without}");
+    let two = json(&[
+        "--json",
+        "--exclude-lang=RUST",
+        "--exclude-lang",
+        "Python",
+        ".",
+    ]);
+    assert!(two.contains("\"languages\":[],"), "{two}");
+}
+
+#[test]
+fn exclude_lang_leaves_embedded_regions_with_their_file() {
+    let s = Scratch::new();
+    s.file(
+        "a.vue",
+        "<template><p>hi</p></template>\n<style>\na {}\n/* c */\n</style>\n",
+    );
+    s.file("x.css", "a {}\n");
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    let plain = json(&["--json", "."]);
+    let without = json(&["--json", "--exclude-lang", "CSS", "."]);
+    assert_eq!(files_of(&plain, "CSS"), 1);
+    assert_eq!(entry(&without, "CSS"), "");
+    assert_eq!(entry(&without, "Vue"), entry(&plain, "Vue"));
+    assert!(entry(&plain, "Vue").contains("\"comment\":1,"), "{plain}");
+}
+
+#[test]
+fn exclude_lang_with_an_unknown_or_missing_name_is_a_usage_error() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    assert_eq!(code(&run(&["--exclude-lang"], &s.0)), 1);
+    assert_eq!(code(&run(&["--exclude-lang=", "."], &s.0)), 1);
+    let unknown = run(&["--exclude-lang", "Fortran", "."], &s.0);
+    assert_eq!(code(&unknown), 1);
+    assert!(unknown.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).starts_with("loc: unknown language Fortran\n"),
+        "{}",
+        String::from_utf8_lossy(&unknown.stderr)
+    );
+    assert_eq!(code(&run(&["--exclude-lang", "PHP code", "."], &s.0)), 1);
+    assert_eq!(code(&run(&["--exclude-lang", "c#", "."], &s.0)), 0);
+}
+
 #[test]
 fn languages_lists_the_table() {
     let s = Scratch::new();

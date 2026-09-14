@@ -345,12 +345,7 @@ pub fn languages(styled: bool) -> String {
         }
     };
     let prefix = if styled { "  " } else { "" };
-    let mut langs: Vec<&crate::lang::Lang> = LANGS
-        .iter()
-        .filter(|lang| {
-            !lang.extensions.is_empty() || !lang.names.is_empty() || !lang.shebangs.is_empty()
-        })
-        .collect();
+    let mut langs: Vec<&crate::lang::Lang> = LANGS.iter().filter(|lang| lang.listed()).collect();
     langs.sort_by(|a, b| a.name.cmp(b.name));
     // Each language becomes one or more physical rows; only the first carries the name.
     let mut rows: Vec<Vec<String>> = Vec::new();

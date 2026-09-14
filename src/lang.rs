@@ -161,6 +161,13 @@ pub struct Lang {
     pub starts: [bool; 256], // bytes that can begin a token in normal state; any other byte is plain code
 }
 
+impl Lang {
+    // Whether --languages lists it: an entry no file can reach, such as an embedded-only language, is not a name the user can give.
+    pub fn listed(&self) -> bool {
+        !self.extensions.is_empty() || !self.names.is_empty() || !self.shebangs.is_empty()
+    }
+}
+
 const NONE: Lang = Lang {
     name: "",
     extensions: &[],
@@ -688,6 +695,13 @@ pub fn by_ext(ext: &[u8]) -> Option<usize> {
     lower.copy_from_slice(ext);
     lower.make_ascii_lowercase();
     BY_EXT.get(&*lower).copied()
+}
+
+// Language index by the name --languages prints, compared without regard to ASCII case.
+pub fn by_language(name: &str) -> Option<usize> {
+    LANGS
+        .iter()
+        .position(|lang| lang.listed() && lang.name.eq_ignore_ascii_case(name))
 }
 
 // Language index by whole file name, compared exactly.
