@@ -203,7 +203,7 @@ impl Report {
         out
     }
 
-    // The language bar: one run of background-colored spaces per language with code, touching, each at least one cell, the rest by code share with floor and largest remainder, ties in table order.
+    // The language bar: one run of FULL BLOCK glyphs in the language's foreground color per language with code, touching, each at least one cell, the rest by code share with floor and largest remainder, ties in table order. Glyphs rather than background paint, so a terminal whose selection repaints cell backgrounds still shows the bar.
     fn bar(&self, width: usize) -> String {
         let rows: Vec<&LangRow> = self.languages.iter().filter(|l| l.code > 0).collect();
         if rows.is_empty() || width < rows.len() {
@@ -221,8 +221,8 @@ impl Report {
         }
         let mut out = String::new();
         for (lang, &n) in rows.iter().zip(&cells) {
-            out.push_str(&bg(lang.color));
-            out.push_str(&" ".repeat(n));
+            out.push_str(&fg(lang.color));
+            out.push_str(&"\u{2588}".repeat(n));
             out.push_str(RESET);
         }
         out
@@ -587,10 +587,6 @@ fn fg(c: [u8; 3]) -> String {
     format!("\x1b[38;2;{};{};{}m", c[0], c[1], c[2])
 }
 
-fn bg(color: [u8; 3]) -> String {
-    format!("\x1b[48;2;{};{};{}m", color[0], color[1], color[2])
-}
-
 // A grid lays out rows under a header: first column left-aligned, the rest right-aligned (or all left-aligned) and at least MIN_WIDTH wide, four-space gutters, a rule as wide as the header. Widths are in characters.
 struct Grid {
     headers: Vec<String>,
@@ -655,7 +651,44 @@ impl Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::size;
+    use super::{LangRow, Report, RESET, SkippedGroup, Totals, fg, size};
+
+    fn lang(name: &'static str, code: usize, color: [u8; 3]) -> LangRow {
+        LangRow {
+            name,
+            files: 1,
+            lines: code,
+            blank: 0,
+            comment: 0,
+            code,
+            bytes: code as u64,
+            color,
+            by_file: Vec::new(),
+        }
+    }
+
+    // Each segment is a run of FULL BLOCK glyphs in the language's foreground color, so a terminal whose selection repaints cell backgrounds still shows the bar.
+    #[test]
+    fn bar_is_full_blocks_in_the_foreground_color() {
+        let report = Report {
+            languages: vec![lang("A", 3, [1, 2, 3]), lang("B", 1, [4, 5, 6])],
+            total: Totals {
+                code: 4,
+                ..Totals::default()
+            },
+            text: SkippedGroup::default(),
+            binary: SkippedGroup::default(),
+            by_file: false,
+        };
+        let expected = format!(
+            "{}{}{RESET}{}{}{RESET}",
+            fg([1, 2, 3]),
+            "\u{2588}".repeat(4),
+            fg([4, 5, 6]),
+            "\u{2588}".repeat(2)
+        );
+        assert_eq!(report.bar(6), expected);
+    }
 
     // The size rule from SPEC.md at its unit boundaries and rounding edges.
     #[test]
