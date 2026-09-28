@@ -137,12 +137,21 @@ impl Region {
     }
 }
 
+pub type LineTest = fn(&[u8]) -> bool;
+
+// Extensions another language owns, taken for this one when test accepts a file's first line.
+pub struct Claim {
+    pub extensions: &'static [&'static str], // lower-case, dot included
+    pub test: LineTest,
+}
+
 // A language as the scanner sees it. Empty slices, None, and false mean the syntax is absent.
 pub struct Lang {
     pub name: &'static str,
     pub extensions: &'static [&'static str], // lower-case, dot included
     pub names: &'static [&'static str],      // whole file names recognized without an extension
     pub shebangs: &'static [&'static str], // interpreters whose #! line recognizes an extensionless file
+    pub claim: Option<Claim>,
     pub line: &'static [&'static [u8]], // line-comment openers; none shares a prefix with another
     pub hash_attribute: bool,           // `#[` begins an attribute, not a comment (PHP)
     pub block_open: &'static [u8],      // block-comment opener; empty when the language has none
@@ -164,7 +173,10 @@ pub struct Lang {
 impl Lang {
     // Whether --languages lists it: an entry no file can reach, such as an embedded-only language, is not a name the user can give.
     pub fn listed(&self) -> bool {
-        !self.extensions.is_empty() || !self.names.is_empty() || !self.shebangs.is_empty()
+        !self.extensions.is_empty()
+            || !self.names.is_empty()
+            || !self.shebangs.is_empty()
+            || self.claim.is_some()
     }
 }
 
@@ -173,6 +185,7 @@ const NONE: Lang = Lang {
     extensions: &[],
     names: &[],
     shebangs: &[],
+    claim: None,
     line: &[],
     hash_attribute: false,
     block_open: b"",
@@ -530,6 +543,18 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
         },
         c_family("Objective-C", &[".m", ".mm"], [0x43, 0x8e, 0xff]),
         Lang {
+            name: "MUMPS",
+            extensions: &[".mumps"],
+            claim: Some(Claim {
+                extensions: &[".m"],
+                test: mumps_routine,
+            }),
+            line: &[b";"],
+            strings: vec![kind(b"\"", b"\"", false, false)],
+            color: [0x6b, 0x8e, 0x23],
+            ..NONE
+        },
+        Lang {
             name: "SCSS",
             extensions: &[".scss"],
             line: &[b"//"],
@@ -628,6 +653,34 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
     ])
 });
 
+// A MUMPS routine's first line: a `;` comment from column zero, as YottaDB's license banners are; or an optional label, `%` or a letter and then letters and digits, with an optional formal list; then spaces or tabs; then the `;` of a comment.
+fn mumps_routine(line: &[u8]) -> bool {
+    if line.first() == Some(&b';') {
+        return true;
+    }
+    let mut i = 0;
+    if line
+        .first()
+        .is_some_and(|&b| b == b'%' || b.is_ascii_alphabetic())
+    {
+        i = 1 + line[1..]
+            .iter()
+            .take_while(|b| b.is_ascii_alphanumeric())
+            .count();
+        if line.get(i) == Some(&b'(') {
+            match line[i..].iter().position(|&b| b == b')') {
+                Some(k) => i += k + 1,
+                None => return false,
+            }
+        }
+    }
+    let spaces = line[i..]
+        .iter()
+        .take_while(|&&b| b == b' ' || b == b'\t')
+        .count();
+    spaces > 0 && line.get(i + spaces) == Some(&b';')
+}
+
 const EXT_MAX: usize = 16; // an extension longer than this is never recognized
 
 // Extensions that are never text and common enough to be numerous in an ordinary tree: a file with one is binary by its name alone, so it is never opened. Anything rarer is left to the NUL check, which is exact.
@@ -694,6 +747,21 @@ static BY_EXT: LazyLock<HashMap<&'static [u8], usize>> = LazyLock::new(|| {
         .collect()
 });
 
+static BY_CLAIM: LazyLock<HashMap<&'static [u8], (usize, LineTest)>> = LazyLock::new(|| {
+    LANGS
+        .iter()
+        .enumerate()
+        .flat_map(|(i, lang)| {
+            lang.claim.iter().flat_map(move |claim| {
+                claim
+                    .extensions
+                    .iter()
+                    .map(move |ext| (ext.as_bytes(), (i, claim.test)))
+            })
+        })
+        .collect()
+});
+
 static BY_NAME: LazyLock<HashMap<&'static [u8], usize>> = LazyLock::new(|| {
     LANGS
         .iter()
@@ -717,6 +785,15 @@ pub fn by_ext(ext: &[u8]) -> Option<usize> {
     lower.copy_from_slice(ext);
     lower.make_ascii_lowercase();
     BY_EXT.get(&*lower).copied()
+}
+
+// The language that may take a file with this extension from its owner, with the test its first line must pass; compared without regard to ASCII case.
+pub fn claimant(ext: &[u8]) -> Option<(usize, LineTest)> {
+    let mut lower = [0; EXT_MAX];
+    let lower = lower.get_mut(..ext.len())?;
+    lower.copy_from_slice(ext);
+    lower.make_ascii_lowercase();
+    BY_CLAIM.get(&*lower).copied()
 }
 
 // Language index by the name --languages prints, compared without regard to ASCII case.

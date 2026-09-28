@@ -10,7 +10,7 @@ use std::sync::{Condvar, Mutex};
 use std::thread;
 
 use crate::ignore::{IgnoreFile, ancestors, exclude_file, ignored, offset_below, read_ignore};
-use crate::lang::{LANGS, binary_ext, by_ext, by_name, by_shebang, text_ext};
+use crate::lang::{LANGS, binary_ext, by_ext, by_name, by_shebang, claimant, text_ext};
 use crate::scan::{Counts, scan};
 
 // Sums kept by one worker: per-language totals by language index, and skipped files by label, text and binary apart. by_file holds every counted file's own counts when --by-file asks for them, and nothing otherwise.
@@ -109,12 +109,29 @@ impl Sums {
                 Err(err) => return self.unreadable(path, &err),
             }
         }
-        let li = li.expect("recognized above");
-        if excluded[li] {
-            return;
-        }
-        let buf = match reader.read(path) {
-            Ok(buf) => buf,
+        let mut li = li.expect("recognized above");
+        let read = match ext.and_then(claimant) {
+            Some((ci, test)) if excluded[li] != excluded[ci] => {
+                // Exactly one of the two is excluded, so the head decides whether the rest is read.
+                reader.read_unless(path, |head| {
+                    if test(first_line(head)) {
+                        li = ci;
+                    }
+                    excluded[li]
+                })
+            }
+            _ if excluded[li] => return, // with a claimant, both are excluded
+            Some((ci, test)) => reader.read(path).map(|buf| {
+                if test(first_line(buf)) {
+                    li = ci;
+                }
+                Some(buf)
+            }),
+            None => reader.read(path).map(Some),
+        };
+        let buf = match read {
+            Ok(Some(buf)) => buf,
+            Ok(None) => return,
             Err(err) => return self.unreadable(path, &err),
         };
         if buf[..buf.len().min(NUL_WINDOW)].contains(&0) {
@@ -283,6 +300,28 @@ impl Reader<'_> {
         Ok(&self.buf)
     }
 
+    // The whole file, unless skip, shown its first NUL_WINDOW bytes, returns true; the file is opened once either way.
+    fn read_unless(
+        &mut self,
+        path: &Path,
+        skip: impl FnOnce(&[u8]) -> bool,
+    ) -> io::Result<Option<&[u8]>> {
+        let _turn = self.turns.acquire();
+        let mut f = File::open(path)?;
+        let size = f.metadata()?.len();
+        self.buf.clear();
+        (&mut f)
+            .take(NUL_WINDOW as u64)
+            .read_to_end(&mut self.buf)?;
+        if skip(&self.buf) {
+            return Ok(None);
+        }
+        let rest = size.saturating_sub(self.buf.len() as u64);
+        self.buf.reserve(rest as usize);
+        f.take(rest).read_to_end(&mut self.buf)?;
+        Ok(Some(&self.buf))
+    }
+
     // The first NUL_WINDOW bytes, enough for the binary check, and the file's size.
     fn head(&mut self, path: &Path) -> io::Result<(&[u8], u64)> {
         let _turn = self.turns.acquire();
@@ -311,6 +350,13 @@ fn shebang(head: &[u8]) -> Option<&[u8]> {
     } else {
         Some(base)
     }
+}
+
+// The first line of a file, after any byte-order mark and without its terminator, cut at NUL_WINDOW so that the head and the whole file give the same line.
+fn first_line(buf: &[u8]) -> &[u8] {
+    let buf = &buf[..buf.len().min(NUL_WINDOW)];
+    let buf = buf.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(buf);
+    &buf[..buf.iter().position(|&b| b == b'\n').unwrap_or(buf.len())]
 }
 
 // The bytes from the last '.' in a name, when that dot is not the first byte.

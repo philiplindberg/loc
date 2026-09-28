@@ -420,7 +420,14 @@ pub fn languages(styled: bool) -> String {
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut first_row: Vec<usize> = Vec::new();
     for lang in &langs {
-        let files: Vec<&str> = lang.extensions.iter().chain(lang.names).copied().collect();
+        let claimed = lang.claim.iter().flat_map(|claim| claim.extensions);
+        let files: Vec<&str> = lang
+            .extensions
+            .iter()
+            .chain(claimed)
+            .chain(lang.names)
+            .copied()
+            .collect();
         let cells = [wrap(&files)];
         let height = cells.iter().map(Vec::len).max().unwrap_or(0).max(1);
         first_row.push(rows.len());

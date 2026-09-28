@@ -349,6 +349,46 @@ fn exclude_lang_drops_the_language_from_every_total_and_label() {
 }
 
 #[test]
+fn a_dot_m_file_is_mumps_by_its_first_line_and_excluded_as_that_language() {
+    let s = Scratch::new();
+    s.file("routine.m", "R ;header\n ; comment\n");
+    s.file("bom.m", "\u{feff}R ;header after a byte-order mark\n");
+    s.file("class.m", "#import <x.h>\n");
+    s.file("long.m", &"x; // longer than the head\n".repeat(400));
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    let plain = json(&["--json", "."]);
+    assert_eq!(files_of(&plain, "MUMPS"), 2);
+    assert_eq!(files_of(&plain, "Objective-C"), 2);
+    assert!(
+        entry(&plain, "Objective-C").contains("\"lines\":401,"),
+        "{plain}"
+    );
+    let no_mumps = json(&["--json", "-x", "mumps", "."]);
+    assert_eq!(entry(&no_mumps, "MUMPS"), "");
+    assert_eq!(
+        entry(&no_mumps, "Objective-C"),
+        entry(&plain, "Objective-C")
+    );
+    let no_objc = json(&["--json", "-x", "objective-c", "."]);
+    assert_eq!(files_of(&no_objc, "MUMPS"), 2);
+    assert_eq!(entry(&no_objc, "Objective-C"), "");
+    Scratch::unreadable(&s.0.join("routine.m"));
+    let one = run(&["--json", "-x", "objective-c", "."], &s.0);
+    assert!(
+        stdout(&one).contains("\"label\":\"unreadable\",\"files\":1,"),
+        "{}",
+        stdout(&one)
+    );
+    let both = run(&["--json", "-x", "objective-c", "-x", "mumps", "."], &s.0);
+    assert!(
+        stdout(&both).contains("\"text\":{\"files\":0,"),
+        "{}",
+        stdout(&both)
+    );
+    assert!(String::from_utf8_lossy(&both.stderr).is_empty());
+}
+
+#[test]
 fn exclude_lang_leaves_embedded_regions_with_their_file() {
     let s = Scratch::new();
     s.file(

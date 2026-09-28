@@ -1,6 +1,6 @@
 # loc
 
-Counts lines of code across a directory tree in 34 languages. Honors `.gitignore` and `--exclude` patterns, skips binaries and symlinks, and reports what it skipped by size so you can tell whether the count is representative.
+Counts lines of code across a directory tree in 35 languages. Honors `.gitignore` and `--exclude` patterns, skips binaries and symlinks, and reports what it skipped by size so you can tell whether the count is representative.
 
 `loc -e fixtures .` on this repository:
 
@@ -94,6 +94,7 @@ Java            .java
 JavaScript      .js .mjs .cjs .jsx
 Kotlin          .kt .kts
 Less            .less
+MUMPS           .mumps .m
 Markdown        .md .markdown
 Objective-C     .m .mm
 PHP             .php .phtml
@@ -117,7 +118,7 @@ YAML            .yml .yaml
 Zig             .zig
 ```
 
-The table is the output of `loc --languages`. A file is recognized by extension, by whole name (`Gemfile`, `.bashrc`), or, when it has no extension, by the interpreter on its `#!` line. Embedded languages count under the file's own: `<script>` and `<style>` inside HTML, Vue, Svelte, and PHP are scanned by JavaScript's and CSS's rules.
+The table is the output of `loc --languages`. A file is recognized by extension, by whole name (`Gemfile`, `.bashrc`), or, when it has no extension, by the interpreter on its `#!` line. A `.m` file whose first line is a MUMPS routine header (`XUS ;SFISC/STAFF - SIGNON`) is MUMPS; any other is Objective-C. Embedded languages count under the file's own: `<script>` and `<style>` inside HTML, Vue, Svelte, and PHP are scanned by JavaScript's and CSS's rules.
 
 ## Rules and tests
 
