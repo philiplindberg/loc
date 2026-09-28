@@ -651,7 +651,7 @@ impl Grid {
 
 #[cfg(test)]
 mod tests {
-    use super::{LangRow, Report, RESET, SkippedGroup, Totals, fg, size};
+    use super::{LangRow, RESET, Report, SkippedGroup, Totals, fg, size};
 
     fn lang(name: &'static str, code: usize, color: [u8; 3]) -> LangRow {
         LangRow {
