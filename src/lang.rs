@@ -254,7 +254,7 @@ fn markup(name: &'static str, extensions: &'static [&'static str], color: [u8; 3
     }
 }
 
-// Colors are GitHub linguist's, except Rip, which linguist does not list.
+// Colors are GitHub linguist's, except Rip and Rig, which linguist does not list, and MUMPS, which it lists as M without a color.
 pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
     prepare(vec![
         js_family(
@@ -356,6 +356,14 @@ pub static LANGS: LazyLock<Vec<Lang>> = LazyLock::new(|| {
             ],
             regex: Some(RIP_REGEX_WORDS),
             color: [0xab, 0x23, 0x17],
+            ..NONE
+        },
+        Lang {
+            name: "Rig",
+            extensions: &[".rig"],
+            line: &[b"#"],
+            strings: vec![DQ, kind(b"'", b"'", false, false)],
+            color: [0x4b, 0x65, 0x84],
             ..NONE
         },
         Lang {

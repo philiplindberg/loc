@@ -1,0 +1,8 @@
+# A comment runs from `#` to the end of the line.
+sub main()
+  x = 1   # after code, too
+
+    # an indented comment
+  print("a # in a string", "quote \" # still a string")
+  print('it''s # raw', 'C:\', "#")
+  print(x)

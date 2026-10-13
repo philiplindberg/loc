@@ -1,6 +1,6 @@
 # loc
 
-Counts lines of code across a directory tree in 35 languages. Honors `.gitignore` and `--exclude` patterns, skips binaries and symlinks, and reports what it skipped by size so you can tell whether the count is representative.
+Counts lines of code across a directory tree in 36 languages. Honors `.gitignore` and `--exclude` patterns, skips binaries and symlinks, and reports what it skipped by size so you can tell whether the count is representative.
 
 `loc -e fixtures .` on this repository:
 
@@ -99,6 +99,7 @@ Markdown        .md .markdown
 Objective-C     .m .mm
 PHP             .php .phtml
 Python          .py .pyi
+Rig             .rig
 Rip             .rip
 Ruby            .rb .rake .gemspec Gemfile Rakefile
 Rust            .rs

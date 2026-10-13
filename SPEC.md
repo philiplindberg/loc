@@ -166,6 +166,7 @@ Classification needs one pass over the file's bytes tracking three states: insid
 | C | `.c` `.h` | `//` | `/* */` | no | `"…"` single, escapes; `'…'` char | `#555555` |
 | C++ | `.cpp` `.cc` `.cxx` `.hpp` `.hh` `.hxx` | `//` | `/* */` | no | identical to C | `#f34b7d` |
 | Rip | `.rip` | `#` | `### ###`, at line start only | no | `"…"` single, escapes, `#{}` `${}` interpolation; `'…'` single, escapes; `"""…"""` multi, escapes, `#{}` `${}` interpolation; `'''…'''` multi, escapes; heregex `///…///` multi, escapes, `#{}` interpolation; regex `/…/` | `#ab2317` |
+| Rig | `.rig` | `#` | none | — | identical to YAML | `#4b6584` |
 | CSS | `.css` | none | `/* */` | no | `"…"` `'…'` single, escapes | `#663399` |
 | YAML | `.yml` `.yaml` | `#` | none | — | `"…"` single, escapes; `'…'` single, no escapes | `#cb171e` |
 | TOML | `.toml` | `#` | none | — | `"…"` single, escapes; `'…'` single, no escapes; `"""…"""` multi, escapes; `'''…'''` multi, no escapes | `#9c4221` |
@@ -191,9 +192,9 @@ Classification needs one pass over the file's bytes tracking three states: insid
 | C# | `.cs` | `//` | `/* */` | no | `"…"` single, escapes; `'…'` char; `@"…"`, `$@"…"`, `@$"…"` multi, no escapes; `"""…"""` multi, no escapes | `#7355dd` |
 | PHP | `.php` `.phtml` | none | `<!-- -->` | no | identical to HTML, plus `<?php`/`<?=` … `?>` regions with the code rules under Scanner | `#4f5d95` |
 
-Colors are GitHub linguist's, except Rip, which linguist does not list, and MUMPS, which it lists as M without a color.
+Colors are GitHub linguist's, except Rip and Rig, which linguist does not list, and MUMPS, which it lists as M without a color.
 
-`///` and `//!` begin with `//` and are comments. A `#!` shebang line is a comment where `#` opens a comment (Python, Rip, CoffeeScript, Ruby, Shell, YAML, TOML), and code in TypeScript and JavaScript, where it does not; there is no special case. A kind marked multi in the table may span lines; the others end at the newline. Doc comments and docstrings get no special treatment.
+`///` and `//!` begin with `//` and are comments. A `#!` shebang line is a comment where `#` opens a comment (Python, Rip, Rig, CoffeeScript, Ruby, Shell, YAML, TOML), and code in TypeScript and JavaScript, where it does not; there is no special case. A kind marked multi in the table may span lines; the others end at the newline. Doc comments and docstrings get no special treatment.
 
 ## Known limitations
 
