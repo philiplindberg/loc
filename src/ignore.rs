@@ -189,8 +189,8 @@ pub fn read_ignore(dir: &Path, offset: usize) -> Option<IgnoreFile> {
         .map(|text| parse_ignore(&text, offset))
 }
 
-// --exclude patterns as one ignore file, each pattern a line, measured from the directory at offset.
-pub fn exclude_file(patterns: &[Vec<u8>], offset: usize) -> IgnoreFile {
+// --exclude or --only patterns as one ignore file, each pattern a line, measured from the directory at offset.
+pub fn pattern_file(patterns: &[Vec<u8>], offset: usize) -> IgnoreFile {
     parse_ignore(&patterns.join(&b'\n'), offset)
 }
 
@@ -207,6 +207,11 @@ fn decides(file: &IgnoreFile, rel: &[u8], name: &[u8], is_dir: bool) -> Option<b
         };
         matches(&pattern.steps, subject).then_some(!pattern.negate)
     })
+}
+
+// Whether a path's own last matching --only line selects it. A selected directory selects everything beneath it, which the walk carries down, so no later line can take a path inside it back.
+pub fn selects(only: &IgnoreFile, rel: &[u8], name: &[u8], is_dir: bool) -> bool {
+    decides(only, rel, name, is_dir) == Some(true)
 }
 
 // The --exclude patterns decide first; then the deepest file with a matching line, and within a file the last matching line.

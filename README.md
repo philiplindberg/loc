@@ -55,24 +55,28 @@ Arguments:
 
 Options:
   -e, --exclude PATTERN    Skip what this .gitignore line would, under every PATH; repeatable
+  -o, --only PATTERN       Count only what this .gitignore line would skip, under every PATH; repeatable
   -x, --exclude-lang NAME  Skip every file of a language, named as --languages prints it; repeatable
+  -l, --only-lang NAME     Count only the files of a language, named as --languages prints it; repeatable
       --no-ignore          Count files that .gitignore files exclude
   -f, --by-file            Add a row per file under its language
       --json               Print the report as JSON
       --no-color           Plain output even on a terminal
       --jobs N             Threads that read and count files (default: all cores)
-  -l, --languages          List the languages and the files each one claims
+      --languages          List the languages and the files each one claims
   -h, --help               Show this help
 
 Examples:
   loc                      Count the current directory
   loc src tests            Count several paths; a file reached twice counts once
   loc -e '*.min.js' .      Skip what that .gitignore line would
+  loc -o '*_test.go' .     Count only what that .gitignore line would skip
   loc -x c -x c++ .        Skip whole languages
+  loc -l rust .            Count one language
   loc --json . | jq .total.code
 ```
 
-`--exclude` takes one `.gitignore` line per flag, with the same rules: `vendor` at any depth, `/vendor` only at the root, `vendor/` only directories, `!name` to re-include. It applies before any `.gitignore` file and with `--no-ignore` too. `--exclude-lang` drops a whole language the same way, by name and regardless of case, so `-x c` skips every `.c` and `.h` file. `--jobs N` bounds the counting threads and never changes the output.
+`--exclude` takes one `.gitignore` line per flag, with the same rules: `vendor` at any depth, `/vendor` only at the root, `vendor/` only directories, `!name` to re-include. It applies before any `.gitignore` file and with `--no-ignore` too. `--only` reads its lines the same way but counts only what they match, and `.gitignore` files and `--exclude` still apply to that; once a directory matches, everything beneath it is selected, so carve one out with `--exclude`. `--exclude-lang` drops a whole language by name, regardless of case, so `-x c` skips every `.c` and `.h` file; `--only-lang` keeps only the languages named, and its skipped section lists only files of those languages that could not be counted. The two language flags do not combine. `--jobs N` bounds the counting threads and never changes the output.
 
 ## Languages
 

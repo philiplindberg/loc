@@ -77,17 +77,19 @@ pub struct Report {
     text: SkippedGroup,
     binary: SkippedGroup,
     by_file: bool,
+    only_lang: bool, // the skipped section is left out when it would be empty
 }
 
 impl Report {
     // Orders the sums as the spec requires: languages by code descending then name, files within a language by code descending then path, labels by size descending then label, all byte-wise.
-    pub fn new(sums: Sums) -> Report {
+    pub fn new(sums: Sums, only_lang: bool) -> Report {
         let mut report = Report {
             languages: Vec::new(),
             total: Totals::default(),
             text: SkippedGroup::default(),
             binary: SkippedGroup::default(),
             by_file: sums.by_file.is_some(),
+            only_lang,
         };
         let mut by_file: Vec<Vec<FileEntry>> = (0..LANGS.len()).map(|_| Vec::new()).collect();
         for row in sums.by_file.into_iter().flatten() {
@@ -328,6 +330,9 @@ impl Report {
         out.push(style(DIM, grid.rule()));
         out.push(style(BOLD, grid.line(&total_row)));
         out.push(style(DIM, grid.rule()));
+        if self.only_lang && self.text.files == 0 && self.binary.files == 0 {
+            return out.join("\n") + "\n";
+        }
         out.push(String::new());
 
         let all_files = self.total.files + self.text.files;
@@ -691,6 +696,7 @@ mod tests {
             text: SkippedGroup::default(),
             binary: SkippedGroup::default(),
             by_file: false,
+            only_lang: false,
         };
         let expected = format!(
             "\x1b[38;2;1;2;3m\x1b[48;2;1;2;3m{}{RESET}\x1b[38;2;4;5;6m\x1b[48;2;4;5;6m{}{RESET}",

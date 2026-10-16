@@ -13,6 +13,7 @@ use std::io::{self, ErrorKind, IsTerminal, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::exit;
+use walk::LangFilter;
 
 macro_rules! usage {
     () => {
@@ -34,20 +35,24 @@ Arguments:
 
 Options:
   -e, --exclude PATTERN    Skip what this .gitignore line would, under every PATH; repeatable
+  -o, --only PATTERN       Count only what this .gitignore line would skip, under every PATH; repeatable
   -x, --exclude-lang NAME  Skip every file of a language, named as --languages prints it; repeatable
+  -l, --only-lang NAME     Count only the files of a language, named as --languages prints it; repeatable
       --no-ignore          Count files that .gitignore files exclude
   -f, --by-file            Add a row per file under its language
       --json               Print the report as JSON
       --no-color           Plain output even on a terminal
       --jobs N             Threads that read and count files (default: all cores)
-  -l, --languages          List the languages and the files each one claims
+      --languages          List the languages and the files each one claims
   -h, --help               Show this help
 
 Examples:
   loc                      Count the current directory
   loc src tests            Count several paths; a file reached twice counts once
   loc -e '*.min.js' .      Skip what that .gitignore line would
+  loc -o '*_test.go' .     Count only what that .gitignore line would skip
   loc -x c -x c++ .        Skip whole languages
+  loc -l rust .            Count one language
   loc --json . | jq .total.code
 "
 );
@@ -58,7 +63,9 @@ struct Options {
     no_ignore: bool,
     by_file: bool,
     excludes: Vec<Vec<u8>>,
+    only: Vec<Vec<u8>>,
     excluded_langs: Vec<bool>, // by index into lang::LANGS
+    only_langs: Vec<bool>,
     jobs: usize,
     roots: Vec<PathBuf>,
 }
@@ -76,7 +83,9 @@ fn parse(args: &[OsString]) -> Result<Options, Exit> {
         no_ignore: false,
         by_file: false,
         excludes: Vec::new(),
+        only: Vec::new(),
         excluded_langs: vec![false; lang::LANGS.len()],
+        only_langs: vec![false; lang::LANGS.len()],
         jobs: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
         roots: Vec::new(),
     };
@@ -93,7 +102,7 @@ fn parse(args: &[OsString]) -> Result<Options, Exit> {
     if args
         .iter()
         .take_while(|a| *a != "--")
-        .any(|a| a == "--languages" || a == "-l")
+        .any(|a| a == "--languages")
     {
         return Err(Exit::Languages {
             no_color: args.iter().any(|a| a == "--no-color"),
@@ -129,18 +138,17 @@ fn parse(args: &[OsString]) -> Result<Options, Exit> {
                 }
                 _ => return Err(Exit::Usage("loc: --exclude needs a pattern".to_string())),
             }
-        } else if arg == "--exclude-lang" || arg == "-x" || arg.starts_with("--exclude-lang=") {
-            let name = value("--exclude-lang", &mut i).unwrap_or_default();
-            let name = name.to_string_lossy();
-            match lang::by_language(&name) {
-                Some(li) => opts.excluded_langs[li] = true,
-                None if name.is_empty() => {
-                    return Err(Exit::Usage(
-                        "loc: --exclude-lang needs a language from --languages".to_string(),
-                    ));
-                }
-                None => return Err(Exit::Usage(format!("loc: unknown language {name}"))),
+        } else if arg == "--only" || arg == "-o" || arg.starts_with("--only=") {
+            match value("--only", &mut i) {
+                Some(pattern) if !pattern.is_empty() => opts.only.push(pattern.as_bytes().to_vec()),
+                _ => return Err(Exit::Usage("loc: --only needs a pattern".to_string())),
             }
+        } else if arg == "--exclude-lang" || arg == "-x" || arg.starts_with("--exclude-lang=") {
+            let li = language("--exclude-lang", value("--exclude-lang", &mut i))?;
+            opts.excluded_langs[li] = true;
+        } else if arg == "--only-lang" || arg == "-l" || arg.starts_with("--only-lang=") {
+            let li = language("--only-lang", value("--only-lang", &mut i))?;
+            opts.only_langs[li] = true;
         } else if arg == "--jobs" || arg.starts_with("--jobs=") {
             let text = value("--jobs", &mut i).unwrap_or_default();
             let text = text.to_string_lossy();
@@ -157,10 +165,28 @@ fn parse(args: &[OsString]) -> Result<Options, Exit> {
         }
         i += 1;
     }
+    if opts.excluded_langs.contains(&true) && opts.only_langs.contains(&true) {
+        return Err(Exit::Usage(
+            "loc: --only-lang and --exclude-lang cannot be combined".to_string(),
+        ));
+    }
     if opts.roots.is_empty() {
         opts.roots.push(PathBuf::from("."));
     }
     Ok(opts)
+}
+
+// The language a flag's value names, as --languages prints it.
+fn language(flag: &str, name: Option<OsString>) -> Result<usize, Exit> {
+    let name = name.unwrap_or_default();
+    let name = name.to_string_lossy();
+    match lang::by_language(&name) {
+        Some(li) => Ok(li),
+        None if name.is_empty() => Err(Exit::Usage(format!(
+            "loc: {flag} needs a language from --languages"
+        ))),
+        None => Err(Exit::Usage(format!("loc: unknown language {name}"))),
+    }
 }
 
 fn main() {
@@ -198,14 +224,24 @@ fn run(args: &[OsString]) -> i32 {
         return 2;
     }
 
-    let report = Report::new(walk::count_trees(
-        &opts.roots,
-        opts.no_ignore,
-        opts.by_file,
-        &opts.excludes,
-        &opts.excluded_langs,
-        opts.jobs,
-    ));
+    let only_lang = opts.only_langs.contains(&true);
+    let langs = if only_lang {
+        LangFilter::only(&opts.only_langs)
+    } else {
+        LangFilter::excluding(opts.excluded_langs)
+    };
+    let report = Report::new(
+        walk::count_trees(
+            &opts.roots,
+            opts.no_ignore,
+            opts.by_file,
+            &opts.excludes,
+            &opts.only,
+            &langs,
+            opts.jobs,
+        ),
+        only_lang,
+    );
     let out = if opts.json {
         report.json()
     } else {

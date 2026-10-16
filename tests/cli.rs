@@ -306,6 +306,120 @@ fn exclude_without_a_pattern_is_a_usage_error() {
     assert_eq!(code(&run(&["--exclude=vendor", "."], &s.0)), 0);
 }
 
+#[test]
+fn only_counts_what_a_gitignore_line_would_skip() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    s.file("vendor/v.rs", "x\n");
+    s.file("vendor/gen/g.rs", "x\n");
+    s.file("vendor/notes.txt", "x\n");
+    s.file("sub/vendor/w.rs", "x\n");
+    s.file("top.txt", "x\n");
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    let vendor = json(&["--json", "--only", "vendor", "."]);
+    assert_eq!(files_of(&vendor, "Rust"), 3);
+    assert!(vendor.contains("\"text\":{\"files\":1,"), "{vendor}");
+    assert!(
+        vendor.contains("\"label\":\".txt\",\"files\":1,"),
+        "{vendor}"
+    );
+    assert_eq!(
+        files_of(&json(&["--json", "--only=/vendor", "."]), "Rust"),
+        2
+    );
+    assert_eq!(
+        files_of(
+            &json(&["--json", "--only", "*.rs", "--only", "!a.rs", "."]),
+            "Rust"
+        ),
+        3
+    );
+    assert_eq!(
+        files_of(
+            &json(&[
+                "--json",
+                "--only",
+                "/vendor/",
+                "--only",
+                "!vendor/gen/",
+                "."
+            ]),
+            "Rust"
+        ),
+        2
+    );
+    assert_eq!(
+        files_of(
+            &json(&[
+                "--json",
+                "--only",
+                "/vendor/",
+                "--exclude",
+                "vendor/gen/",
+                "."
+            ]),
+            "Rust"
+        ),
+        1
+    );
+    let none = json(&["--json", "--only", "nothing", "."]);
+    assert!(none.contains("\"languages\":[],"), "{none}");
+    assert!(none.contains("\"text\":{\"files\":0,"), "{none}");
+}
+
+#[test]
+fn only_leaves_gitignore_in_force_and_applies_with_no_ignore() {
+    let s = Scratch::new();
+    s.file(".gitignore", "*.md\n");
+    s.file("notes.md", "x\n");
+    s.file("a.rs", "x\n");
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    let only = json(&["--json", "--only", "*.md", "."]);
+    assert!(only.contains("\"languages\":[],"), "{only}");
+    let no_ignore = json(&["--json", "--no-ignore", "--only", "*.md", "."]);
+    assert_eq!(files_of(&no_ignore, "Markdown"), 1);
+    assert_eq!(files_of(&no_ignore, "Rust"), 0);
+}
+
+#[test]
+fn only_is_relative_to_each_path_and_a_file_path_always_counts() {
+    let s = Scratch::new();
+    for root in ["a", "b"] {
+        s.file(&format!("{root}/vendor/x.rs"), "x\n");
+        s.file(&format!("{root}/y.rs"), "x\n");
+    }
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    assert_eq!(
+        files_of(&json(&["--json", "--only", "/vendor", "a", "b"]), "Rust"),
+        2
+    );
+    assert_eq!(
+        files_of(&json(&["--json", "--only", "*.py", "a/y.rs"]), "Rust"),
+        1
+    );
+}
+
+#[test]
+fn only_decides_which_files_by_file_lists() {
+    let s = Scratch::new();
+    s.file("src/a.rs", "x\n");
+    s.file("src/b.rs", "x\n");
+    s.file("other/c.rs", "x\n");
+    let json = stdout(&run(&["--json", "--by-file", "--only", "src/", "."], &s.0));
+    assert_eq!(files_of(&json, "Rust"), 2);
+    assert!(json.contains("\"path\":\"src/a.rs\","), "{json}");
+    assert!(json.contains("\"path\":\"src/b.rs\","), "{json}");
+    assert!(!json.contains("other/c.rs"), "{json}");
+}
+
+#[test]
+fn only_without_a_pattern_is_a_usage_error() {
+    let s = Scratch::new();
+    assert_eq!(code(&run(&["--only"], &s.0)), 1);
+    assert_eq!(code(&run(&["--only=", "."], &s.0)), 1);
+    assert_eq!(code(&run(&["--only=vendor", "."], &s.0)), 0);
+}
+
 // The JSON object for one language, or an empty string when it is absent.
 fn entry(json: &str, language: &str) -> String {
     let key = format!("{{\"name\":\"{language}\",");
@@ -424,6 +538,148 @@ fn exclude_lang_with_an_unknown_or_missing_name_is_a_usage_error() {
 }
 
 #[test]
+fn only_lang_counts_named_languages_and_reports_only_their_misses() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    s.file("b.py", "x\n");
+    s.file("notes.txt", "x\n");
+    fs::write(s.0.join("data.bin"), b"x\0y").unwrap();
+    fs::write(s.0.join("blob"), b"x\0y").unwrap();
+    let out = |args: &[&str]| stdout(&run(args, &s.0));
+    let rust = out(&["--json", "--only-lang", "rust", "."]);
+    assert_eq!(files_of(&rust, "Rust"), 1);
+    assert_eq!(entry(&rust, "Python"), "");
+    assert!(rust.contains("\"total\":{\"files\":1,"), "{rust}");
+    assert!(rust.contains("\"text\":{\"files\":0,"), "{rust}");
+    assert!(rust.contains("\"binary\":{\"files\":0,"), "{rust}");
+    let table = out(&["--only-lang", "rust", "."]);
+    assert!(table.ends_with("─\n"), "{table}");
+    assert!(!table.contains("skipped"), "{table}");
+    let two = out(&["--json", "--only-lang=RUST", "--only-lang", "Python", "."]);
+    assert_eq!(files_of(&two, "Python"), 1);
+    assert!(two.contains("\"total\":{\"files\":2,"), "{two}");
+    fs::write(s.0.join("blob.rs"), b"x\0y").unwrap();
+    let missed = out(&["--only-lang", "rust", "."]);
+    assert!(missed.contains("\n0 of 1 files skipped,"), "{missed}");
+    assert!(
+        missed.ends_with("\n1 binary file, 3 B: .rs 1\n"),
+        "{missed}"
+    );
+}
+
+#[test]
+fn only_lang_reads_an_extensionless_file_only_when_a_named_language_has_shebangs() {
+    let s = Scratch::new();
+    s.file("script", "#!/usr/bin/env python3\nx = 1\n");
+    s.file("tool", "#!/bin/sh\necho\n");
+    let locked = s.file("locked", "#!/usr/bin/env python3\n");
+    Scratch::unreadable(&locked);
+    let python = run(&["--json", "--only-lang", "python", "."], &s.0);
+    let json = stdout(&python);
+    assert_eq!(files_of(&json, "Python"), 1);
+    assert_eq!(entry(&json, "Shell"), "");
+    assert!(
+        json.contains("\"label\":\"unreadable\",\"files\":1,"),
+        "{json}"
+    );
+    let rust = run(&["--json", "--only-lang", "rust", "."], &s.0);
+    assert!(
+        stdout(&rust).contains("\"text\":{\"files\":0,"),
+        "{}",
+        stdout(&rust)
+    );
+    assert!(String::from_utf8_lossy(&rust.stderr).is_empty());
+}
+
+#[test]
+fn only_lang_reads_a_dot_m_file_when_one_of_its_languages_is_named() {
+    let s = Scratch::new();
+    s.file("routine.m", "R ;header\n");
+    s.file("class.m", "#import <x.h>\n");
+    let locked = s.file("locked.m", "R ;header\n");
+    Scratch::unreadable(&locked);
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    let mumps = json(&["--json", "--only-lang", "mumps", "."]);
+    assert_eq!(files_of(&mumps, "MUMPS"), 1);
+    assert_eq!(entry(&mumps, "Objective-C"), "");
+    assert!(
+        mumps.contains("\"label\":\"unreadable\",\"files\":1,"),
+        "{mumps}"
+    );
+    let both = json(&[
+        "--json",
+        "--only-lang",
+        "mumps",
+        "--only-lang",
+        "objective-c",
+        ".",
+    ]);
+    assert_eq!(files_of(&both, "MUMPS"), 1);
+    assert_eq!(files_of(&both, "Objective-C"), 1);
+    let neither = run(&["--json", "--only-lang", "rust", "."], &s.0);
+    assert!(
+        stdout(&neither).contains("\"text\":{\"files\":0,"),
+        "{}",
+        stdout(&neither)
+    );
+    assert!(String::from_utf8_lossy(&neither.stderr).is_empty());
+}
+
+#[test]
+fn only_lang_leaves_embedded_regions_with_their_file() {
+    let s = Scratch::new();
+    s.file(
+        "a.vue",
+        "<template><p>hi</p></template>\n<style>\na {}\n</style>\n",
+    );
+    s.file("x.css", "a {}\n");
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    let only = json(&["--json", "--only-lang", "CSS", "."]);
+    assert_eq!(entry(&only, "Vue"), "");
+    assert_eq!(entry(&only, "CSS"), entry(&json(&["--json", "."]), "CSS"));
+    assert!(only.contains("\"total\":{\"files\":1,"), "{only}");
+}
+
+#[test]
+fn only_lang_drops_a_file_path_of_another_language() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    let json = |args: &[&str]| stdout(&run(args, &s.0));
+    let python = json(&["--json", "--only-lang", "python", "a.rs"]);
+    assert!(python.contains("\"languages\":[],"), "{python}");
+    assert!(python.contains("\"text\":{\"files\":0,"), "{python}");
+    assert_eq!(
+        files_of(&json(&["--json", "--only-lang", "rust", "a.rs"]), "Rust"),
+        1
+    );
+}
+
+#[test]
+fn only_lang_with_a_bad_name_or_with_exclude_lang_is_a_usage_error() {
+    let s = Scratch::new();
+    s.file("a.rs", "x\n");
+    assert_eq!(code(&run(&["--only-lang"], &s.0)), 1);
+    assert_eq!(code(&run(&["--only-lang=", "."], &s.0)), 1);
+    let unknown = run(&["--only-lang", "Fortran", "."], &s.0);
+    assert_eq!(code(&unknown), 1);
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).starts_with("loc: unknown language Fortran\n"),
+        "{}",
+        String::from_utf8_lossy(&unknown.stderr)
+    );
+    let both = run(&["--only-lang", "rust", "--exclude-lang", "c", "."], &s.0);
+    assert_eq!(code(&both), 1);
+    assert!(both.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&both.stderr)
+            .starts_with("loc: --only-lang and --exclude-lang cannot be combined\n"),
+        "{}",
+        String::from_utf8_lossy(&both.stderr)
+    );
+    assert_eq!(code(&run(&["--only-lang", "c#", "."], &s.0)), 0);
+}
+
+#[test]
 fn short_flags_are_exact_aliases_that_take_the_next_argument_and_do_not_bundle() {
     let s = Scratch::new();
     s.file("a.rs", "x\n");
@@ -442,17 +698,35 @@ fn short_flags_are_exact_aliases_that_take_the_next_argument_and_do_not_bundle()
         ]))
     );
     assert_eq!(
+        stdout(&out(&["--json", "-o", "vendor", "-l", "rust", "."])),
+        stdout(&out(&[
+            "--json",
+            "--only",
+            "vendor",
+            "--only-lang",
+            "rust",
+            "."
+        ]))
+    );
+    assert_eq!(
         files_of(&stdout(&out(&["--json", "-e", "vendor", "."])), "Rust"),
         1
     );
-    assert_eq!(stdout(&out(&["-l"])), stdout(&out(&["--languages"])));
-    assert!(!stdout(&out(&["-l"])).is_empty());
+    assert_eq!(
+        files_of(&stdout(&out(&["--json", "-o", "vendor", "."])), "Rust"),
+        1
+    );
+    assert!(!stdout(&out(&["--languages"])).is_empty());
     for bad in [
         &["-e=vendor", "."][..],
+        &["-o=vendor", "."],
         &["-x=python", "."],
+        &["-l=python", "."],
         &["-el", "."],
         &["-e"],
+        &["-o"],
         &["-x"],
+        &["-l"],
     ] {
         let bad_run = out(bad);
         assert_eq!(code(&bad_run), 1, "{bad:?}");

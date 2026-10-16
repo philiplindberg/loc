@@ -9,7 +9,9 @@ use std::sync::mpsc::{Receiver, sync_channel};
 use std::sync::{Condvar, Mutex};
 use std::thread;
 
-use crate::ignore::{IgnoreFile, ancestors, exclude_file, ignored, offset_below, read_ignore};
+use crate::ignore::{
+    IgnoreFile, ancestors, ignored, offset_below, pattern_file, read_ignore, selects,
+};
 use crate::lang::{LANGS, binary_ext, by_ext, by_name, by_shebang, claimant, text_ext};
 use crate::scan::{Counts, scan};
 
@@ -28,6 +30,34 @@ pub struct FileRow {
     pub path: PathBuf,
     pub counts: Counts,
     pub bytes: u64,
+}
+
+// The languages that count, by index into LANGS. With --only-lang a file of no language drops out too, so an extensionless file is read for its #! line only when a counted language lists interpreters.
+pub struct LangFilter {
+    excluded: Vec<bool>,
+    only: bool,
+    shebangs: bool,
+}
+
+impl LangFilter {
+    pub fn excluding(excluded: Vec<bool>) -> LangFilter {
+        LangFilter {
+            excluded,
+            only: false,
+            shebangs: true,
+        }
+    }
+
+    pub fn only(named: &[bool]) -> LangFilter {
+        LangFilter {
+            excluded: named.iter().map(|&n| !n).collect(),
+            only: true,
+            shebangs: LANGS
+                .iter()
+                .zip(named)
+                .any(|(lang, &n)| n && !lang.shebangs.is_empty()),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -70,10 +100,24 @@ impl Sums {
         }
     }
 
-    fn count(&mut self, path: &Path, reader: &mut Reader, excluded: &[bool]) {
+    fn count(&mut self, path: &Path, reader: &mut Reader, langs: &LangFilter) {
         let name = path.file_name().map_or(&b""[..], |n| n.as_bytes());
         let ext = extension(name);
         let mut li = ext.and_then(by_ext).or_else(|| by_name(name));
+        if li.is_none() && langs.only {
+            // No name claims the file, so it drops out unless its #! line may yet name a counted language.
+            if ext.is_some() || !langs.shebangs {
+                return;
+            }
+            li = match reader.head(path) {
+                Ok((head, _)) if head.contains(&0) => None,
+                Ok((head, _)) => shebang(head).and_then(by_shebang),
+                Err(err) => return self.unreadable(path, &err),
+            };
+            if li.is_none() {
+                return;
+            }
+        }
         if li.is_none()
             && let Some(ext) = ext
             && binary_ext(ext)
@@ -110,6 +154,7 @@ impl Sums {
             }
         }
         let mut li = li.expect("recognized above");
+        let excluded = &langs.excluded;
         let read = match ext.and_then(claimant) {
             Some((ci, test)) if excluded[li] != excluded[ci] => {
                 // Exactly one of the two is excluded, so the head decides whether the rest is read.
@@ -171,11 +216,18 @@ fn add(group: &mut HashMap<String, Skipped>, label: String, files: usize, bytes:
     entry.bytes += bytes;
 }
 
+// The --exclude and --only patterns, each as one ignore file measured from the root being walked.
+struct Patterns {
+    exclude: Option<IgnoreFile>,
+    only: Option<IgnoreFile>,
+}
+
 // Walks every root in turn. With several roots a file is emitted once however many roots reach it: each root is resolved, and since links are never followed, a file has one path under a resolved root.
 fn walk_roots(
     roots: &[PathBuf],
     no_ignore: bool,
     excludes: &[Vec<u8>],
+    only: &[Vec<u8>],
     emit: &mut impl FnMut(PathBuf),
 ) {
     let mut seen: Option<HashSet<PathBuf>> = (roots.len() > 1).then(HashSet::new);
@@ -190,11 +242,17 @@ fn walk_roots(
                 emit(path);
             }
         };
-        walk(root, no_ignore, excludes, &mut once);
+        walk(root, no_ignore, excludes, only, &mut once);
     }
 }
 
-fn walk(root: &Path, no_ignore: bool, excludes: &[Vec<u8>], emit: &mut impl FnMut(PathBuf)) {
+fn walk(
+    root: &Path,
+    no_ignore: bool,
+    excludes: &[Vec<u8>],
+    only: &[Vec<u8>],
+    emit: &mut impl FnMut(PathBuf),
+) {
     if !fs::metadata(root).is_ok_and(|st| st.is_dir()) {
         return emit(root.to_path_buf());
     }
@@ -203,16 +261,23 @@ fn walk(root: &Path, no_ignore: bool, excludes: &[Vec<u8>], emit: &mut impl FnMu
     } else {
         ancestors(root)
     };
-    let excludes = (!excludes.is_empty()).then(|| exclude_file(excludes, offset_below(&rel)));
-    walk_dir(root, &rel, &mut stack, excludes.as_ref(), no_ignore, emit);
+    let file =
+        |lines: &[Vec<u8>]| (!lines.is_empty()).then(|| pattern_file(lines, offset_below(&rel)));
+    let patterns = Patterns {
+        exclude: file(excludes),
+        only: file(only),
+    };
+    let selected = patterns.only.is_none();
+    walk_dir(root, &rel, &mut stack, &patterns, selected, no_ignore, emit);
 }
 
-// rel is the directory's path relative to the base the ignore files are measured from.
+// rel is the directory's path relative to the base the ignore files are measured from; selected says whether the --only patterns, if any, selected the directory or one above it.
 fn walk_dir(
     dir: &Path,
     rel: &[u8],
     stack: &mut Vec<IgnoreFile>,
-    excludes: Option<&IgnoreFile>,
+    patterns: &Patterns,
+    selected: bool,
     no_ignore: bool,
     emit: &mut impl FnMut(PathBuf),
 ) {
@@ -237,13 +302,21 @@ fn walk_dir(
                 }
                 let mut child_rel = prefix.clone();
                 child_rel.extend_from_slice(name.as_bytes());
-                if ignored(excludes, stack, &child_rel, name.as_bytes(), kind.is_dir()) {
+                let (name, is_dir) = (name.as_bytes(), kind.is_dir());
+                if ignored(patterns.exclude.as_ref(), stack, &child_rel, name, is_dir) {
                     continue;
                 }
+                let selected = selected
+                    || patterns
+                        .only
+                        .as_ref()
+                        .is_some_and(|only| selects(only, &child_rel, name, is_dir));
                 let path = entry.path();
-                if kind.is_dir() {
-                    walk_dir(&path, &child_rel, stack, excludes, no_ignore, emit);
-                } else {
+                if is_dir {
+                    walk_dir(
+                        &path, &child_rel, stack, patterns, selected, no_ignore, emit,
+                    );
+                } else if selected {
                     emit(path);
                 }
             }
@@ -385,7 +458,8 @@ pub fn count_trees(
     no_ignore: bool,
     by_file: bool,
     excludes: &[Vec<u8>],
-    excluded_langs: &[bool],
+    only: &[Vec<u8>],
+    langs: &LangFilter,
     jobs: usize,
 ) -> Sums {
     let (tx, rx) = sync_channel::<PathBuf>(1024);
@@ -395,7 +469,11 @@ pub fn count_trees(
         changed: Condvar::new(),
     };
     thread::scope(|s| {
-        s.spawn(move || walk_roots(roots, no_ignore, excludes, &mut |path| drop(tx.send(path))));
+        s.spawn(move || {
+            walk_roots(roots, no_ignore, excludes, only, &mut |path| {
+                drop(tx.send(path))
+            })
+        });
         let workers: Vec<_> = (0..jobs)
             .map(|_| {
                 s.spawn(|| {
@@ -407,7 +485,7 @@ pub fn count_trees(
                     loop {
                         let next = rx.lock().unwrap().recv();
                         let Ok(path) = next else { break };
-                        sums.count(&path, &mut reader, excluded_langs);
+                        sums.count(&path, &mut reader, langs);
                     }
                     sums
                 })
